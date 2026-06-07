@@ -121,7 +121,7 @@ struct RoleplayView: View {
                                     .font(.caption).fixedSize().disabled(model.hasStarted)
                                 }
                                 SchemaEditorView(def: $model.customSchema).disabled(model.hasStarted)
-                                Text("Custom turns show raw JSON (no tappable suggestions). Save + export Swift from “Save to pipeline…”.")
+                                Text("Custom turns show raw JSON (no tappable suggestions). Save + export Swift from “Save to Lab…”.")
                                     .font(.caption2).foregroundStyle(.secondary)
                             } else {
                                 Text("Using the typed RoleplayTurnGen (tappable suggestions + typed metrics).")
@@ -160,7 +160,7 @@ struct RoleplayView: View {
                         savedMessage = nil
                         showingSave = true
                     } label: {
-                        Label("Save to pipeline…", systemImage: "tray.and.arrow.down")
+                        Label("Save to Lab…", systemImage: "tray.and.arrow.down")
                             .frame(maxWidth: .infinity)
                     }
                     .controlSize(.large)

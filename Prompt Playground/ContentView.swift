@@ -10,8 +10,8 @@ struct ContentView: View {
                 .tabItem { Label("Gloss", systemImage: "text.book.closed") }
             RoleplayView()
                 .tabItem { Label("Role-play", systemImage: "bubble.left.and.bubble.right") }
-            PipelineView()
-                .tabItem { Label("Pipeline", systemImage: "chart.bar.doc.horizontal") }
+            PipelineView()   // "Lab" tab; type/file kept as Pipeline* (see CLAUDE.md naming note)
+                .tabItem { Label("Lab", systemImage: "chart.bar.doc.horizontal") }
         }
         .tint(Theme.accent)
         .preferredColorScheme(.dark)
@@ -128,7 +128,7 @@ struct GlossView: View {
                                     .font(.caption).fixedSize()
                                 }
                                 SchemaEditorView(def: $model.customSchema)
-                                Text("Runs via DynamicGenerationSchema. Save it + export Swift from “Save to pipeline…”.")
+                                Text("Runs via DynamicGenerationSchema. Save it + export Swift from “Save to Lab…”.")
                                     .font(.caption2).foregroundStyle(.secondary)
                             } else {
                                 Text("Using the typed @Generable from the selected preset.")
@@ -157,7 +157,7 @@ struct GlossView: View {
                         savedMessage = nil
                         showingSave = true
                     } label: {
-                        Label("Save to pipeline…", systemImage: "tray.and.arrow.down")
+                        Label("Save to Lab…", systemImage: "tray.and.arrow.down")
                             .frame(maxWidth: .infinity)
                     }
                     .controlSize(.large)

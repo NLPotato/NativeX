@@ -78,8 +78,8 @@ struct SaveToPipelineSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Save to pipeline").font(.title3).fontWeight(.semibold)
-                Text("Promote what you just tried into reusable pipeline templates and test cases.")
+                Text("Save to Lab").font(.title3).fontWeight(.semibold)
+                Text("Promote what you just tried into reusable Lab templates and test cases.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             .padding([.horizontal, .top], 20)
@@ -122,7 +122,7 @@ struct SaveToPipelineSheet: View {
                             TextField("Schema name", text: $schemaName)
                             Text(trimmedSchemaName.isEmpty
                                  ? "Enter a name."
-                                 : "Saves as “\(trimmedSchemaName) v\(nextSchemaVersion)” — persists for dynamic batch eval in the Pipeline tab.")
+                                 : "Saves as “\(trimmedSchemaName) v\(nextSchemaVersion)” — persists for dynamic batch eval in the Lab tab.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }

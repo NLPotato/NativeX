@@ -9,27 +9,41 @@ Never add `#Playground { }` auto-run blocks — Xcode auto-runs them and crashes
 
 **Never invoke the `expo-libs` skill (or any Expo/JS-oriented skill) here.** This is a pure native Swift macOS app — no Expo, no JS bridge. That skill is irrelevant. For Foundation Models, `GlossPlayground.swift` is the canonical in-repo usage example; `docs/reference/foundation-models.md` is the API-truths + gotchas reference.
 
-## Architecture
-- `Prompt Playground/GlossPlayground.swift` — single-turn gloss: `@Generable` schemas + `PromptPreset` registry (`presets`) + `PlaygroundModel` engine (fresh session per run, `{{source}}`/`{{target}}` substitution, availability check).
-- `Prompt Playground/RoleplayPlayground.swift` — multi-turn role-play: nested `@Generable` (`RoleplayLineGen`/`RoleplayTurnGen`) + `RoleplayModel` engine (ONE persistent `LanguageModelSession` across turns, `[Turn]` log, `start()`/`send()`, 5-field `{{learning}}/{{native}}/{{situation}}/{{you}}/{{ai}}` substitution).
-- `Prompt Playground/ContentView.swift` — `TabView` shell over `GlossView`, `RoleplayView`, and `PipelineView`; seeds the store on first launch.
-- `Prompt Playground/RoleplayView.swift` — role-play surface: 5-field scene setup + live transcript (reply + 2 tappable suggestions + translations per turn) + composer.
-- To test a new schema: add a `@Generable` struct (file scope, app target) + a `PromptPreset` entry. Nothing else changes.
+## Structure (orientation for coding agents)
+`ContentView.swift` is a 3-tab `TabView` (seeds the store on first launch). Each tab is one **flow** with its own input view + `@Observable` engine, all sharing one SwiftData store (`Storage.swift`) and one core layer (`PlaygroundCore.swift`).
 
-## LLMOps pipeline (Pipeline tab)
-Batch-eval layer over the two engines. New files in `Prompt Playground/`:
-- `PlaygroundCore.swift` — `TaskKind`; `GenConfig` (Codable mirror of `GenerationOptions`); `TokenEstimator` (**Apple exposes NO token API** — usage is ESTIMATED: CJK≈1 tok/char else ≈1 tok/4 chars; 4096 window per Apple TN3193); `LanguageTools` (NaturalLanguage); shared `prettyJSON`; `ModelAvailability`.
-- `Metrics.swift` — objective evaluators, `RunMetrics`, composite `Scoring`, `VariantStats`, `GoldenThresholds` (ship-ready gates).
+Every output schema runs in one of **two lanes**:
+- **Typed** (default) — compile-time `@Generable` structs. The canonical lane that ships to wiekant; keeps typed metrics + tappable UI. Add one: a `@Generable` struct (file scope, app target) + a `PromptPreset` entry; nothing else changes.
+- **Dynamic** (prototyping, additive — never the default) — a UI-authored `SchemaDef` tree compiled at runtime to `DynamicGenerationSchema`. Run instantly, persist, or codegen back to a typed `@Generable` to promote it. See `docs/reference/foundation-models.md`.
+
+### Flow 1 — Gloss (single-shot)
+- `GlossPlayground.swift` — `@Generable` schemas + `PromptPreset` registry (`presets`) + `PlaygroundModel` engine (fresh session per run, availability check).
+- `GlossView` (in `ContentView.swift`) — input/output surface.
+
+### Flow 2 — Role-play (multi-turn)
+- `RoleplayPlayground.swift` — nested `@Generable` (`RoleplayLineGen`/`RoleplayTurnGen`) + `RoleplayModel` engine (ONE persistent `LanguageModelSession` across turns, `[Turn]` log, `start()`/`send()`, 5-field `{{learning}}/{{native}}/{{situation}}/{{you}}/{{ai}}` substitution).
+- `RoleplayView.swift` — 5-field scene setup + live transcript (reply + 2 tappable suggestions + translations per turn) + composer.
+
+### Flow 3 — Lab (batch eval) — ⚠ tab label only; code is still `Pipeline*`
+LangSmith-style layer that fans a prompt variant over a dataset and scores it.
+- `Pipeline.swift` — `ExperimentRunner` (fan a variant over a dataset; persist; progress+cancel).
+- `PipelineView.swift` — configure/run experiments, leaderboard, scorecard, manual ratings, judge, export.
 - `Runners.swift` — headless `GlossRunner` (one-shot) + `RoleplayRunner` (scripted multi-turn, auto-advances on `suggestions[0]`).
-- `Pipeline.swift` — `ExperimentRunner` (fan a variant over a dataset, persist, progress+cancel).
-- `Storage.swift` — SwiftData models (`PromptTemplateModel` versioned, `DatasetModel`→`ExampleModel`, `ExperimentModel`→`RunModel`) + `GlossInput`/`RoleplayInput`.
-- `SeedData.swift` — first-launch templates + starter datasets (incl. Starbucks barista).
+- `Metrics.swift` — objective evaluators, `RunMetrics`, composite `Scoring`, `VariantStats`, `GoldenThresholds` (ship gates). `GenericEvaluator` scores dynamic-lane runs (no typed bundle).
 - `Judge.swift` — on-device LLM-as-judge (`JudgeScore` 1–5) + judge-vs-human `Agreement`.
 - `GoldenExport.swift` — export winner → `Documents/golden/*.json` to bundle into wiekant.
-- `PipelineView.swift` — configure/run experiments, leaderboard, scorecard, manual ratings, judge, export.
-- `SaveToPipeline.swift` — `SaveToPipelineSheet`: bridge from the Gloss/Role-play tabs into the store. Promotes the live prompt → versioned `PromptTemplateModel` (auto-bumps version per name) and/or the live input → `ExampleModel` in a chosen/new dataset. Role-play captures the transcript's user turns as the replay script; gloss canonicalizes `{{source}}/{{target}}`→`{{learning}}/{{native}}`.
+- `SaveToPipeline.swift` — `SaveToPipelineSheet`: bridges Gloss/Role-play → the store (prompt → versioned `PromptTemplateModel`; input → `ExampleModel`; custom schema → `SchemaModel` + Swift codegen). Reached via each tab's **Save to pipeline…** button.
 
-Convention: pipeline + seeds use canonical `{{learning}}/{{native}}`; the single-shot **Gloss** tab still has legacy `{{source}}/{{target}}` (runners accept both; promoting to the pipeline canonicalizes them). Each playground tab has a **Save to pipeline…** button (see `SaveToPipeline.swift`).
+> **Naming:** the **Lab** tab was formerly "Pipeline" — only the tab label changed. Files (`Pipeline.swift`, `PipelineView.swift`, `SaveToPipeline.swift`), types (`PipelineView`, `SaveToPipelineSheet`), and the "Save to pipeline…" buttons keep the `Pipeline` name in code.
+
+### Shared layers
+- `PlaygroundCore.swift` — `TaskKind`; `GenConfig` (Codable mirror of `GenerationOptions`); `TokenEstimator` (**Apple exposes NO token API** — ESTIMATED: CJK≈1 tok/char else ≈1 tok/4 chars; 4096 window per Apple TN3193); `LanguageTools` (NaturalLanguage); shared `prettyJSON`; `ModelAvailability`.
+- `Storage.swift` — SwiftData models: `PromptTemplateModel` + `SchemaModel` (both versioned), `DatasetModel`→`ExampleModel`, `ExperimentModel`→`RunModel`, + `GlossInput`/`RoleplayInput`.
+- `SeedData.swift` — first-launch templates + starter datasets (incl. Starbucks barista).
+- **Dynamic-schema lane:** `SchemaDef.swift` (Codable node-tree + walker/validation, `maxDepth=3`) · `SchemaBuilder.swift` (`SchemaDef`→`GenerationSchema`; `DynamicRun.respond`) · `SwiftCodegen.swift` (`SchemaDef`→`@Generable` source) · `DynamicRunner.swift` (headless dynamic runs) · `SchemaEditorView.swift` (recursive editor) · `GenConfigControls.swift` (shared config UI).
+
+### Placeholders
+Lab + seeds use canonical `{{learning}}/{{native}}`; the Gloss tab still emits legacy `{{source}}/{{target}}` (runners accept both; saving to the Lab canonicalizes them).
 
 ## Sync to wiekant (on request)
 The latest wiekant prompts live on its **`feat/prompting`** branch — read them with `git -C /Users/lwj/workspace/wiekant show feat/prompting:<path>` or `git grep <term> feat/prompting`, **NOT** the working tree (it may sit on an older branch). When the user says a prompt/config is final, port it into wiekant: locate the matching `@Generable`/prompt via a **targeted grep** (never a full read), confirm the file with the user, then edit. Record the resolved path here after the first sync.
