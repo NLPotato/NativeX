@@ -179,6 +179,90 @@ enum LanguageTools {
     }
 }
 
+// MARK: - Deterministic gloss enrichment (NaturalLanguage + CFStringTokenizer)
+// The on-device model is unreliable at producing the word list, POS, lemma, or readings: it
+// alters surfaces and romanizes CJK despite instructions (verified empirically — see the eval
+// harness). So the gloss pipeline lets DETERMINISTIC APIs own those fields. NLTokenizer segments
+// (coverage 100%, surfaces verbatim); NLTagger supplies POS+lemma for the 8 languages it covers;
+// CFStringTokenizer supplies the Latin reading (pinyin/romaji/romaja) for non-Latin scripts. The
+// model then only annotates this fixed list (in-context meaning, sentence translation).
+
+/// One deterministically-analyzed token. `pos`/`lemma` are nil for languages NLTagger can't tag
+/// (CJK, Arabic, …); `romanization` is nil for Latin-script languages.
+struct EnrichedToken: Codable, Equatable, Sendable {
+    var surface: String
+    var pos: String?
+    var lemma: String?
+    var romanization: String?
+}
+
+extension LanguageTools {
+    /// The only 8 languages NLTagger supports for `.lexicalClass` / `.lemma` (verified).
+    static let taggedLanguages: Set<NLLanguage> = [.english, .german, .french, .spanish,
+                                                   .italian, .portuguese, .russian, .turkish]
+    /// POS vocabulary aligned to `NLTag.lexicalClass` raw values (lowercased) — used both as the
+    /// model's `partOfSpeech` enum and as the normalization target for the deterministic tags.
+    static let posVocabulary = ["noun", "verb", "adjective", "adverb", "pronoun", "determiner",
+                                "preposition", "particle", "number", "conjunction", "interjection",
+                                "classifier", "other"]
+
+    private static let nonLatinLanguages: Set<NLLanguage> = [.japanese, .simplifiedChinese,
+        .traditionalChinese, .korean, .russian, .arabic, .hindi, .thai, .greek, .hebrew]
+
+    /// Segment a sentence and attach deterministic POS+lemma (where supported) and romanization
+    /// (non-Latin scripts). This is the authoritative word list for the gloss; the model annotates it.
+    static func enrich(_ sentence: String, language name: String) -> [EnrichedToken] {
+        let lang = language(named: name)
+        let tokenizer = NLTokenizer(unit: .word)
+        if let lang { tokenizer.setLanguage(lang) }
+        tokenizer.string = sentence
+        let ranges = tokenizer.tokens(for: sentence.startIndex..<sentence.endIndex)
+
+        let canTag = lang.map(taggedLanguages.contains) ?? false
+        let nonLatin = lang.map(nonLatinLanguages.contains) ?? false
+        let tagger: NLTagger? = canTag ? NLTagger(tagSchemes: [.lexicalClass, .lemma]) : nil
+        if let tagger, let lang {
+            tagger.string = sentence
+            tagger.setLanguage(lang, range: sentence.startIndex..<sentence.endIndex)
+        }
+        let localeID = lang?.rawValue ?? name
+
+        return ranges.map { range in
+            let surface = String(sentence[range])
+            var pos: String?
+            var lemma: String?
+            if let tagger {
+                if let raw = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lexicalClass).0?.rawValue {
+                    let p = raw.lowercased() == "otherword" ? "other" : raw.lowercased()
+                    pos = posVocabulary.contains(p) ? p : "other"
+                }
+                lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
+            }
+            let rom = nonLatin ? latinTranscription(surface, localeID: localeID) : nil
+            return EnrichedToken(surface: surface, pos: pos, lemma: lemma,
+                                 romanization: (rom?.isEmpty == false) ? rom : nil)
+        }
+    }
+
+    /// Rule-based Latin reading via CFStringTokenizer (pinyin / romaji / romaja). Deterministic,
+    /// on-device, full iOS↔macOS parity — the model is never trusted with this.
+    static func latinTranscription(_ text: String, localeID: String) -> String {
+        let cf = text as CFString
+        let locale = Locale(identifier: localeID) as CFLocale
+        let tok = CFStringTokenizerCreate(nil, cf, CFRangeMake(0, CFStringGetLength(cf)),
+                                          kCFStringTokenizerUnitWord, locale)
+        var parts: [String] = []
+        var t = CFStringTokenizerAdvanceToNextToken(tok)
+        while t.rawValue != 0 {
+            if let r = CFStringTokenizerCopyCurrentTokenAttribute(tok, kCFStringTokenizerAttributeLatinTranscription) as? String {
+                parts.append(r)
+            }
+            t = CFStringTokenizerAdvanceToNextToken(tok)
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
 // MARK: - JSON helpers
 
 /// Pretty JSON (declaration order preserved) for schema-vs-output checking and storage.
