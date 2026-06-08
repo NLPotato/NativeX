@@ -38,6 +38,7 @@ func resolveGloss(_ template: String, _ input: GlossInput) -> String {
         .replacingOccurrences(of: "{{native}}", with: input.native)
         .replacingOccurrences(of: "{{source}}", with: input.learning)
         .replacingOccurrences(of: "{{target}}", with: input.native)
+        .replacingOccurrences(of: "{{proficiency}}", with: "intermediate") // per-example proficiency: future GlossInput field
 }
 
 func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
@@ -55,22 +56,18 @@ func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
 enum GlossRunner {
     static func run(template: String, input: GlossInput, config: GenConfig) async -> RunResultData {
         let resolved = resolveGloss(template, input)
-        let userPrompt = "Sentence: \(input.sentence)"
-        let session = LanguageModelSession(instructions: resolved)
         let start = Date()
         do {
-            let response = try await session.respond(to: userPrompt,
-                                                     generating: GlossResultGen.self,
-                                                     includeSchemaInPrompt: true,
-                                                     options: config.toOptions())
+            let out = try await GlossPipeline.run(sentence: input.sentence, learning: input.learning,
+                                                  instructions: resolved, config: config)
             let latency = millis(since: start)
-            let result = response.content
-            let outputJSON = prettyJSON(result)
-            let (gloss, lang) = Evaluators.gloss(result, sentence: input.sentence, native: input.native)
-            let context = TokenEstimator.estimate(session.transcript)
+            let outputJSON = prettyJSON(out.result)
+            let (gloss, lang) = Evaluators.gloss(out.result, sentence: input.sentence, native: input.native)
+            // GlossPipeline owns its sessions, so estimate context from the resolved text instead of a transcript.
+            let context = TokenEstimator.estimate(resolved + "\n" + out.promptSent + "\n" + outputJSON)
             let metrics = RunMetrics(
                 decoded: true, errorType: nil, latencyMs: latency,
-                promptTokensEst: TokenEstimator.estimate(resolved + "\n" + userPrompt),
+                promptTokensEst: TokenEstimator.estimate(resolved + "\n" + out.promptSent),
                 outputTokensEst: TokenEstimator.estimate(outputJSON),
                 contextTokensEst: context, contextHeadroom: TokenEstimator.headroom(context),
                 onTargetLanguage: lang, gloss: gloss, roleplay: nil)

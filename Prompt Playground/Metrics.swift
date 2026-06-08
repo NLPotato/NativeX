@@ -100,7 +100,7 @@ enum Evaluators {
         let posOK = pos.isEmpty ? 0 : Double(pos.filter { knownPOS.contains($0) }.count) / Double(pos.count)
 
         // Language check: the generated translations must be in the native language.
-        var nativeTexts = [r.sentenceTranslation] + r.words.map(\.translation) + r.grammarNotes
+        var nativeTexts = [r.sentenceTranslation] + r.words.map(\.translation)
         nativeTexts = nativeTexts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let lang = LanguageTools.matchScore(nativeTexts, expected: native)
 
