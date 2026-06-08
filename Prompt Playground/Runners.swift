@@ -102,7 +102,13 @@ enum GlossRunner {
                 outputTokensEst: TokenEstimator.estimate(outputJSON),
                 contextTokensEst: context, contextHeadroom: TokenEstimator.headroom(context),
                 onTargetLanguage: lang, gloss: gloss, roleplay: nil)
-            return RunResultData(outputJSON: outputJSON, turnsJSON: nil, errorText: nil, metrics: metrics)
+            let trace = RunTrace(stages: [
+                .variables(ctx: ["sentence": input.sentence, "learning": input.learning, "native": input.native],
+                           keys: ["sentence", "learning", "native"]),
+                .prompt(instructions: resolved, prompt: out.promptSent, schemaInjected: true),
+                .model(output: outputJSON, ms: latency, ttftMs: nil, tokensPerSec: nil, schemaInjected: true),
+            ])
+            return RunResultData(outputJSON: outputJSON, turnsJSON: nil, errorText: nil, metrics: metrics, trace: trace)
         } catch {
             let (type, text) = classify(error)
             return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
@@ -129,6 +135,12 @@ enum RoleplayRunner {
         var totalLatency = 0
         var scriptIndex = 0
         let maxTurns = max(1, input.maxTurns)
+        var stages: [RunTrace.Stage] = [
+            .variables(ctx: ["learning": input.learning, "native": input.native, "situation": input.situation,
+                             "you": input.youRole, "ai": input.aiRole],
+                       keys: ["learning", "native", "situation", "you", "ai"]),
+            .prompt(instructions: resolved, prompt: opening, schemaInjected: true),
+        ]
 
         for turnNo in 0..<maxTurns {
             // Decide the user's input for this turn.
@@ -150,8 +162,10 @@ enum RoleplayRunner {
                                                          generating: RoleplayTurnGen.self,
                                                          includeSchemaInPrompt: true,
                                                          options: options)
-                totalLatency += millis(since: start)
+                let turnMs = millis(since: start)
+                totalLatency += turnMs
                 turns.append(response.content)
+                stages.append(.turn(turnNo + 1, body: prettyJSON(response.content), ms: turnMs))
                 peakContext = max(peakContext, TokenEstimator.estimate(session.transcript))
             } catch let g as LanguageModelSession.GenerationError {
                 totalLatency += millis(since: start)
@@ -184,7 +198,7 @@ enum RoleplayRunner {
             contextTokensEst: peakContext, contextHeadroom: TokenEstimator.headroom(peakContext),
             onTargetLanguage: lang, gloss: nil, roleplay: roleplay)
         return RunResultData(outputJSON: prettyJSON(turns[turns.count - 1]), turnsJSON: turnsJSON,
-                             errorText: errorText, metrics: metrics)
+                             errorText: errorText, metrics: metrics, trace: RunTrace(stages: stages))
     }
 }
 

@@ -34,6 +34,7 @@ struct PipelineView: View {
     @State private var sweepTemplateIDs: Set<UUID> = []
     @State private var sweepTemps: Set<Double> = [0.3, 0.7]
     @State private var sweepModes: Set<GenConfig.Sampling> = [.greedy, .nucleus]
+    @State private var sweepSeeds = 1   // distinct seeds per random-mode variant (measures variance)
 
     private var datasets: [DatasetModel] { allDatasets.filter { $0.task == task } }
     private var templates: [PromptTemplateModel] { allTemplates.filter { $0.task == task } }
@@ -247,11 +248,17 @@ struct PipelineView: View {
                     variants.append(Variant(template: t, schemaDef: def, schemaID: schemaID, config: c))
                 } else {
                     let temps = sweepTemps.isEmpty ? [config.temperature ?? 0.7] : sweepTemps.sorted()
+                    let seedCount = max(sweepSeeds, 1)
                     for temp in temps {
-                        var c = config; c.sampling = mode; c.temperature = temp
-                        if mode == .topK, c.topK == nil { c.topK = 50 }
-                        if mode == .nucleus, c.probabilityThreshold == nil { c.probabilityThreshold = 0.9 }
-                        variants.append(Variant(template: t, schemaDef: def, schemaID: schemaID, config: c))
+                        for s in 0..<seedCount {
+                            var c = config; c.sampling = mode; c.temperature = temp
+                            if mode == .topK, c.topK == nil { c.topK = 50 }
+                            if mode == .nucleus, c.probabilityThreshold == nil { c.probabilityThreshold = 0.9 }
+                            // >1 seed → distinct fixed seeds (1,2,…) so the variants are reproducible
+                            // yet differ, exposing run-to-run variance. 1 seed → keep the base config's.
+                            c.seed = seedCount > 1 ? UInt64(s + 1) : config.seed
+                            variants.append(Variant(template: t, schemaDef: def, schemaID: schemaID, config: c))
+                        }
                     }
                 }
             }
@@ -306,6 +313,13 @@ struct PipelineView: View {
                 HStack(spacing: DS.Space.xs) {
                     ForEach([0.0, 0.3, 0.5, 0.7, 1.0], id: \.self) { temp in
                         chip(String(format: "%.1f", temp), on: sweepTemps.contains(temp)) { toggleTemp(temp) }
+                    }
+                }
+                Stepper(value: $sweepSeeds, in: 1...5) {
+                    HStack(spacing: DS.Space.xs) {
+                        Text("Seeds per variant").font(.dsMicro).foregroundStyle(.secondary)
+                        Text("\(sweepSeeds)").font(.dsMicro.monospacedDigit())
+                        if sweepSeeds > 1 { Text("— measures run-to-run variance").font(.dsMicro).foregroundStyle(.tertiary) }
                     }
                 }
                 let exampleCount = selectedDataset?.examples.count ?? 0

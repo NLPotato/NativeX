@@ -74,6 +74,11 @@ extension RunTrace.Stage {
         Self(kind: "finalOutput", ok: true, title: "Final output", body: output)
     }
 
+    /// One model call in a multi-turn run (role-play), titled by turn number.
+    static func turn(_ index: Int, body: String, ms: Int?) -> Self {
+        Self(kind: "model", ok: true, title: "Turn \(index) · model", body: body, ms: ms)
+    }
+
     /// "{{key}} = value" lines for the given keys present in the context (the Variables stage body).
     private static func contextPreview(_ ctx: [String: String], keys: [String]) -> String {
         let shown = keys.filter { ctx[$0]?.isEmpty == false }

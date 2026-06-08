@@ -27,7 +27,13 @@ enum DynamicRunner {
             let metrics = GenericEvaluator.metrics(json: outputJSON, decoded: true, latencyMs: latency,
                                                    resolvedPrompt: resolved + "\n" + userPrompt,
                                                    expectedLanguage: input.native, context: context)
-            return RunResultData(outputJSON: outputJSON, turnsJSON: nil, errorText: nil, metrics: metrics)
+            let trace = RunTrace(stages: [
+                .variables(ctx: ["sentence": input.sentence, "learning": input.learning, "native": input.native],
+                           keys: ["sentence", "learning", "native"]),
+                .prompt(instructions: resolved, prompt: userPrompt, schemaInjected: true),
+                .model(output: outputJSON, ms: latency, ttftMs: nil, tokensPerSec: nil, schemaInjected: true),
+            ])
+            return RunResultData(outputJSON: outputJSON, turnsJSON: nil, errorText: nil, metrics: metrics, trace: trace)
         } catch {
             let (type, text) = classify(error)
             return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
@@ -70,6 +76,12 @@ enum DynamicRunner {
         var totalLatency = 0
         var scriptIndex = 0
         let maxTurns = max(1, input.maxTurns)
+        var stages: [RunTrace.Stage] = [
+            .variables(ctx: ["learning": input.learning, "native": input.native, "situation": input.situation,
+                             "you": input.youRole, "ai": input.aiRole],
+                       keys: ["learning", "native", "situation", "you", "ai"]),
+            .prompt(instructions: resolved, prompt: RoleplayRunner.opening, schemaInjected: true),
+        ]
 
         for turnNo in 0..<maxTurns {
             let userText: String
@@ -88,9 +100,12 @@ enum DynamicRunner {
             do {
                 let content = try await DynamicRun.respond(session: session, prompt: userText,
                                                            def: def, options: options)
-                totalLatency += millis(since: start)
+                let turnMs = millis(since: start)
+                totalLatency += turnMs
                 lastContent = content
-                turnJSONs.append(prettyJSONString(content.jsonString))
+                let turnJSON = prettyJSONString(content.jsonString)
+                turnJSONs.append(turnJSON)
+                stages.append(.turn(turnNo + 1, body: turnJSON, ms: turnMs))
                 peakContext = max(peakContext, TokenEstimator.estimate(session.transcript))
             } catch let g as LanguageModelSession.GenerationError {
                 totalLatency += millis(since: start)
@@ -117,7 +132,7 @@ enum DynamicRunner {
                                                latencyMs: totalLatency, resolvedPrompt: resolved,
                                                expectedLanguage: input.learning, context: peakContext)
         return RunResultData(outputJSON: prettyJSONString(last.jsonString), turnsJSON: turnsJSON,
-                             errorText: errorText, metrics: metrics)
+                             errorText: errorText, metrics: metrics, trace: RunTrace(stages: stages))
     }
 
     /// Best-effort read of suggestions[0].text from a GeneratedContent (for auto-advance). Returns
