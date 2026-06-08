@@ -55,6 +55,9 @@ struct PromptPreset: Identifiable {
     var hooks: HookPipelineDef = .empty
     var useSchema: Bool = false
     var schema: SchemaDef? = nil
+    /// Seed values for the preset's `{{name}}` variables, applied on load so a preset built around a
+    /// specific language (e.g. the Korean CJK sample) arrives configured for it. nil ⇒ leave as-is.
+    var defaultVariables: [String: String]? = nil
 }
 
 let presets: [PromptPreset] = [
@@ -76,7 +79,32 @@ let presets: [PromptPreset] = [
                     params: ["language": "{{learning}}", "format": "numbered"])
         ]),
         useSchema: true,
-        schema: .glossLike
+        schema: .glossLike,
+        defaultVariables: ["learning": "German", "native": "English", "proficiency": "intermediate"]
+    ),
+    PromptPreset(
+        id: "cjk-gloss",
+        name: "Example: CJK gloss — Korean (reading + Guided Generation)",
+        defaultInstructions: """
+        You are a {{learning}} tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
+        Below is a {{learning}} sentence and a numbered list of its words, each followed by its reading in \
+        [brackets]. For EACH listed word, in the same order, give: its dictionary (base) form, its part of \
+        speech, and its single best meaning IN THIS SENTENCE as one short {{native}} gloss. Copy each surface \
+        and reading exactly as given — do not re-romanize. {{learning}} words are often conjugated or carry \
+        particles; always give the plain dictionary form. Then give a natural {{native}} translation of the \
+        whole sentence and one or two short grammar notes.
+
+        Words:
+        {{words}}
+        """,
+        defaultInput: "저는 커피를 주문하고 싶어요.",
+        hooks: HookPipelineDef(pre: [
+            HookDef(op: .enrichGloss, inputVar: "prompt", outputVar: "words",
+                    params: ["language": "{{learning}}"])
+        ]),
+        useSchema: true,
+        schema: .cjkGloss,
+        defaultVariables: ["learning": "Korean", "native": "English", "proficiency": "intermediate"]
     ),
     PromptPreset(
         id: "blank",
@@ -257,6 +285,7 @@ final class PlaygroundModel {
         hooks = first.hooks
         useCustomSchema = first.useSchema
         customSchema = first.schema ?? .glossLike
+        if let v = first.defaultVariables { variableValues = v }
     }
 
     var selectedPreset: PromptPreset {
@@ -332,6 +361,7 @@ final class PlaygroundModel {
         hooks = p.hooks
         useCustomSchema = p.useSchema
         if let s = p.schema { customSchema = s }
+        if let v = p.defaultVariables { variableValues = v }
     }
 
     var isModelAvailable: Bool {

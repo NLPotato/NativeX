@@ -82,6 +82,29 @@ extension SchemaDef {
         ])
     }
 
+    /// Reading-aware gloss for non-Latin (CJK) sentences. `reading` is the one piece native APIs CAN
+    /// do for CJK deterministically (CFStringTokenizer → romaja/pinyin/romaji, surfaced by the
+    /// Enrich-tokens hook); `dictionaryForm` and `partOfSpeech` are the pieces they CAN'T (NLTagger
+    /// doesn't tag CJK), so the model supplies them. Pairs with the "CJK gloss" preset's pre-hook.
+    static var cjkGloss: SchemaDef {
+        let word = ObjectDef(name: "CJKGlossWord", description: "One word from the sentence, with its reading and analysis", fields: [
+            Field(name: "surface", description: "Word exactly as it appears, in the original script", type: .string),
+            Field(name: "reading", description: "Pronunciation in Latin letters (romaja / pinyin / romaji), copied from the reading given for this word", type: .string),
+            Field(name: "dictionaryForm", description: "Dictionary / base form — the unconjugated verb or adjective, or the word with any attached particle removed", type: .string),
+            Field(name: "partOfSpeech", description: "Part of speech",
+                  type: .enumeration(cases: ["noun", "verb", "adjective", "adverb", "pronoun", "determiner",
+                                             "particle", "numeral", "classifier", "conjunction", "interjection", "other"])),
+            Field(name: "meaning", description: "In-context meaning as one short gloss in the learner's native language", type: .string),
+        ])
+        return SchemaDef(typeName: "CJKGlossResult", description: "Reading-aware gloss for a non-Latin (CJK) sentence", fields: [
+            Field(name: "words", description: "Each word in the sentence, in order",
+                  type: .array(of: .object(word), min: nil, max: nil)),
+            Field(name: "sentenceTranslation", description: "Natural translation of the whole sentence", type: .string),
+            Field(name: "grammarNotes", description: "One or two short grammar notes (particles, honorifics, word order)",
+                  type: .array(of: .string, min: nil, max: nil)),
+        ])
+    }
+
     /// Mirrors `RoleplayTurnGen` — nested object + bounded array-of-objects (the canonical nesting test).
     static var roleplayLike: SchemaDef {
         let line = ObjectDef(name: "Line", description: "One spoken line of dialogue, with a translation", fields: [
