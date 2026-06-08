@@ -131,13 +131,13 @@ Never nest `elev.card` inside `elev.card` (the frost-on-frost that read as "cram
 **One** component for every labeled input. Structure:
 
 ```
-VStack(alignment: .leading, spacing: space.xs)        // 4
+VStack(alignment: .leading, spacing: space.sm)        // 8 — air under the label
   Text(label)            → label / text.secondary
   <control>              → §4.2
   Text(help or error)    → caption / text.tertiary (or danger)   // only if present
 ```
 
-- **Single-line control**: height **28** fixed, horizontal inset **8**, vertical inset **6**, `surface.field` fill, `border.field` 1px, `radius.sm`. Focus → `border.focus`.
+- **Single-line control**: horizontal inset **12** (`md`), vertical inset **8** (`sm`), height = text + insets (no fixed height). A plain `TextField` has no internal text inset, so 12/8 visually matches the multi-line editor's effective inset (its `NSTextView` adds ~5 on top of the 8). `surface.field` fill, `border.field` 1px, `radius.sm`. Focus → `border.focus`.
 - **Multi-line control** (TextEditor): same fill/border/radius, `.scrollContentBackground(.hidden)`, inset **8**, height in **line multiples** — `prompt` = 3 lines (88), `instructions` = 12 lines (260), `command` = 3 lines.
 - **Mono variant**: `code` font; everything else identical.
 - **No bespoke widths.** Inline mini-fields (array bounds, hook in/out) use a single `fieldMiniWidth = 88`; full-width fields use `maxWidth: .infinity`. Kill `40/44/160/200`.
@@ -227,10 +227,10 @@ extension Color {
 
 // MARK: Component modifiers
 extension View {
-    /// Single-line field control chrome: fixed height, consistent fill/border/radius.
+    /// Single-line field control chrome: comfortable inner inset, consistent fill/border/radius.
     func dsTextField() -> some View {
-        textFieldStyle(.plain)
-            .padding(.horizontal, DS.Space.sm).frame(height: DS.Size.control)
+        textFieldStyle(.plain).font(.dsBody)
+            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.separator, lineWidth: 1))
     }
@@ -272,7 +272,7 @@ struct DSField<Control: View>: View {
     @ViewBuilder var control: () -> Control
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.xs) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             Text(label).font(.dsLabel).foregroundStyle(.secondary)
             control()
             if let error { Text(error).font(.dsCaption).foregroundStyle(.dsDanger) }

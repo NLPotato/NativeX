@@ -52,7 +52,7 @@ struct GlossView: View {
         HSplitView {
             // INPUT
             ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.lg) {
+                VStack(alignment: .leading, spacing: DS.Space.xl) {
                     if let msg = model.availabilityMessage {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
                             .font(.dsBody)
@@ -90,9 +90,15 @@ struct GlossView: View {
                             .dsEditor(lines: 2)
                     }
 
-                    VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    field("Instructions", help: "The system prompt. Reference variables with {{name}}.") {
+                        TextEditor(text: $model.instructions)
+                            .font(.dsCode)
+                            .dsEditor(lines: 10)
+                    }
+
+                    VStack(alignment: .leading, spacing: DS.Space.sm) {
                         Text("Variables").font(.dsLabel).foregroundStyle(.secondary)
-                        VStack(spacing: DS.Space.sm) {
+                        VStack(spacing: DS.Space.md) {
                             if model.variableKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
                                 Text("No variables. Add a {{name}} token in Instructions or Prompt.")
                                     .font(.dsCaption).foregroundStyle(.secondary)
@@ -132,12 +138,6 @@ struct GlossView: View {
                             }
                         }
                         .dsCard()
-                    }
-
-                    field("Instructions", help: "The system prompt. Reference variables with {{name}}.") {
-                        TextEditor(text: $model.instructions)
-                            .font(.dsCode)
-                            .dsEditor(lines: 10)
                     }
 
                     sectionHeader("Pipeline · optional")
@@ -254,7 +254,7 @@ struct GlossView: View {
 
             // OUTPUT — the run as live pipeline stages.
             ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.md) {
+                VStack(alignment: .leading, spacing: DS.Space.lg) {
                     HStack {
                         Text("Pipeline").font(.dsTitle)
                         Spacer()

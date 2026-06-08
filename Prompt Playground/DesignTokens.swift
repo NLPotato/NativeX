@@ -56,12 +56,12 @@ extension ShapeStyle where Self == Color {
 // MARK: - Component chrome
 
 extension View {
-    /// Single-line field control: fixed height, one fill/border/radius. See design.md §4.1.
+    /// Single-line field control: one fill/border/radius + comfortable inner inset that matches the
+    /// multi-line editor (a plain TextField has no internal text inset, so it needs more than 8). §4.1.
     func dsTextField() -> some View {
         textFieldStyle(.plain)
             .font(.dsBody)
-            .padding(.horizontal, DS.Space.sm)
-            .frame(height: DS.Size.control)
+            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.white.opacity(0.08), lineWidth: 1))
     }
@@ -104,7 +104,7 @@ struct DSField<Control: View>: View {
     @ViewBuilder var control: () -> Control
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.xs) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             Text(label).font(.dsLabel).foregroundStyle(.secondary)
             control()
             if let error { Text(error).font(.dsCaption).foregroundStyle(.dsDanger) }

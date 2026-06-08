@@ -60,21 +60,22 @@ struct SchemaEditorView: View {
     @Binding var def: SchemaDef
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.sm) {
+        VStack(alignment: .leading, spacing: DS.Space.xl) {
+            // Schema-level metadata reads as the form header (no card) so it stays distinct from the
+            // field-entry cards below.
             VStack(alignment: .leading, spacing: DS.Space.md) {
-                VStack(alignment: .leading, spacing: DS.Space.xs) {
-                    Text("Schema name").font(.dsLabel).foregroundStyle(.secondary)
+                DSField(label: "Schema name") {
                     TextField("TypeName", text: $def.typeName).dsTextField()
                 }
-                VStack(alignment: .leading, spacing: DS.Space.xs) {
-                    Text("Description").font(.dsLabel).foregroundStyle(.secondary)
-                    TextField("Guides the model — what this schema represents", text: $def.description)
-                        .dsTextField()
+                DSField(label: "Description", help: "Guides the model — what this schema represents.") {
+                    TextField("What this schema represents", text: $def.description).dsTextField()
                 }
             }
-            .dsCard()
 
-            FieldsEditor(fields: $def.fields, depth: 0)
+            VStack(alignment: .leading, spacing: DS.Space.md) {
+                DSSectionHeader("Fields")
+                FieldsEditor(fields: $def.fields, depth: 0)
+            }
         }
     }
 }
@@ -86,7 +87,7 @@ struct FieldsEditor: View {
     let depth: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.sm) {
+        VStack(alignment: .leading, spacing: DS.Space.md) {
             ForEach($fields) { $field in
                 FieldRow(field: $field, depth: depth) { fields.removeAll { $0.id == field.id } }
             }
