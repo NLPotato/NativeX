@@ -97,6 +97,12 @@ extension SchemaDef {
     }
 
     static func starter(for task: TaskKind) -> SchemaDef { task == .roleplay ? .roleplayLike : .glossLike }
+
+    /// A minimal one-field schema — the "New schema" reset target in the editor.
+    static var blank: SchemaDef {
+        SchemaDef(typeName: "Output", description: "",
+                  fields: [Field(name: "field1", description: "", type: .string)])
+    }
 }
 
 // MARK: - Shared traversal (used by SchemaBuilder + SwiftCodegen so they never diverge)

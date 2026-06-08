@@ -63,11 +63,11 @@ struct SchemaEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Schema name").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                    Text("Schema name").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
                     TextField("TypeName", text: $def.typeName).textFieldStyle(.roundedBorder)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Description").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                    Text("Description").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
                     TextField("Guides the model — what this schema represents", text: $def.description)
                         .textFieldStyle(.roundedBorder).font(.caption)
                 }
@@ -103,17 +103,41 @@ struct FieldRow: View {
     @Binding var field: SchemaDef.Field
     let depth: Int
     let onDelete: () -> Void
+    @State private var expanded: Bool
+
+    init(field: Binding<SchemaDef.Field>, depth: Int, onDelete: @escaping () -> Void) {
+        self._field = field
+        self.depth = depth
+        self.onDelete = onDelete
+        _expanded = State(initialValue: depth == 0)   // top-level fields open; nested collapsed so deep trees stay scannable
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    TextField("name", text: $field.name).textFieldStyle(.roundedBorder).frame(maxWidth: 200)
+                    Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.caption)
+                }
+                TextField("description", text: $field.description).textFieldStyle(.roundedBorder).font(.caption)
+                TypeEditor(type: $field.type, depth: depth)
+            }
+            .padding(.top, 6)
+        } label: {
             HStack(spacing: 6) {
-                TextField("name", text: $field.name).textFieldStyle(.roundedBorder).frame(maxWidth: 160)
+                Text(field.name.isEmpty ? "unnamed" : field.name)
+                    .fontWeight(.medium)
+                    .foregroundStyle(field.name.isEmpty ? Color.secondary : Color.primary)
+                Text(field.type.shortLabel)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+                if field.isOptional {
+                    Text("optional").font(.caption2).foregroundStyle(.tertiary)
+                }
                 Spacer()
-                Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.caption2)
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }.buttonStyle(.borderless)
             }
-            TextField("description", text: $field.description).textFieldStyle(.roundedBorder).font(.caption)
-            TypeEditor(type: $field.type, depth: depth)
         }
         .padding(10)
         .glassCard(radius: 10)
@@ -206,11 +230,11 @@ struct ArrayEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("count min").font(.caption2).foregroundStyle(.secondary)
-                TextField("–", text: minText).frame(width: 40).textFieldStyle(.roundedBorder)
-                Text("max").font(.caption2).foregroundStyle(.secondary)
-                TextField("–", text: maxText).frame(width: 40).textFieldStyle(.roundedBorder)
-                Text("of:").font(.caption2).foregroundStyle(.secondary)
+                Text("count min").font(.caption).foregroundStyle(.secondary)
+                TextField("–", text: minText).frame(width: 44).textFieldStyle(.roundedBorder)
+                Text("max").font(.caption).foregroundStyle(.secondary)
+                TextField("–", text: maxText).frame(width: 44).textFieldStyle(.roundedBorder)
+                Text("of:").font(.caption).foregroundStyle(.secondary)
             }
             TypeEditor(type: element, depth: depth + 1)
         }
@@ -246,5 +270,47 @@ struct ObjectEditor: View {
         .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
+    }
+}
+
+// MARK: - Collapsed-row summary
+
+extension SchemaDef.FieldType {
+    /// Compact one-word summary shown on a collapsed field row, e.g. "Array<Object>", "Enum (3)".
+    var shortLabel: String {
+        switch self {
+        case .string:              return "Text"
+        case .int:                 return "Integer"
+        case .double:              return "Decimal"
+        case .bool:                return "Boolean"
+        case .enumeration(let c):  return "Enum (\(c.count))"
+        case .array(let of, _, _): return "Array<\(of.shortLabel)>"
+        case .object(let o):       return "Object {\(o.fields.count)}"
+        }
+    }
+}
+
+// MARK: - Modal sheet host
+
+/// Hosts the schema editor in a focused sheet so a deep tree gets room to breathe instead of pushing
+/// the left-panel controls off-screen. Edits bind live; "New schema" resets to a blank one-field def.
+struct SchemaEditorSheet: View {
+    @Binding var def: SchemaDef
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Guided Generation schema").font(.headline)
+                Spacer()
+                Button("New schema") { def = .blank }
+                Button("Done") { isPresented = false }.keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            Divider()
+            ScrollView { SchemaEditorView(def: $def).padding(16) }
+        }
+        .frame(minWidth: 560, idealWidth: 620, minHeight: 520, idealHeight: 680)
+        .playgroundBackground()
     }
 }

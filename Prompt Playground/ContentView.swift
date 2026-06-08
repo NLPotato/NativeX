@@ -26,6 +26,8 @@ struct GlossView: View {
     @State private var model = PlaygroundModel()
     @State private var showingSave = false
     @State private var savedMessage: String?
+    @State private var showingSchemaSheet = false
+    @State private var showingHooksSheet = false
 
     // The genericized tab saves/loads under the `.generic` task lane.
     @Query(filter: #Predicate<PromptTemplateModel> { $0.taskRaw == "generic" }, sort: \.createdAt)
@@ -90,7 +92,7 @@ struct GlossView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Variables").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                        Text("Variables").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
                         VStack(spacing: 6) {
                             if model.variableKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
                                 Text("No variables. Add a {{name}} token in Instructions or Prompt.")
@@ -152,21 +154,28 @@ struct GlossView: View {
                     DisclosureGroup("Guided Generation") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Guided Generation constrains the model to a fixed output schema (structured output) via constrained decoding.")
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Toggle("Use a custom output schema", isOn: $model.useCustomSchema)
                             if model.useCustomSchema {
-                                if !savedSchemas.isEmpty {
-                                    Menu {
-                                        ForEach(savedSchemas) { s in
-                                            Button("\(s.name) v\(s.version)") { if let d = s.def { model.customSchema = d } }
+                                schemaSummary
+                                HStack(spacing: 8) {
+                                    Button { showingSchemaSheet = true } label: {
+                                        Label("Edit schema…", systemImage: "curlybraces.square")
+                                    }
+                                    Button("New") { model.customSchema = .blank }
+                                    if !savedSchemas.isEmpty {
+                                        Menu("Load") {
+                                            ForEach(savedSchemas) { s in
+                                                Button("\(s.name) v\(s.version)") { if let d = s.def { model.customSchema = d } }
+                                            }
                                         }
-                                    } label: { Label("Load saved schema", systemImage: "tray.and.arrow.up") }
-                                    .font(.caption).fixedSize()
+                                        .fixedSize()
+                                    }
                                 }
-                                SchemaEditorView(def: $model.customSchema)
+                                .font(.callout).fontWeight(.regular)
                                 Text("Runs via DynamicGenerationSchema. Save it + export Swift from “Save to Lab…”.")
-                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(.secondary)
                             } else {
                                 Text("No schema — the model returns free-form text.")
                                     .font(.caption).foregroundStyle(.secondary)
@@ -176,18 +185,30 @@ struct GlossView: View {
                     }
                     .font(.callout)
                     .fontWeight(.semibold)
+                    .sheet(isPresented: $showingSchemaSheet) {
+                        SchemaEditorSheet(def: $model.customSchema, isPresented: $showingSchemaSheet)
+                    }
 
                     DisclosureGroup("Hooks") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Deterministic native ops or shell scripts run before/after the model. A pre-hook’s output becomes a {{variable}} you can use in the prompt.")
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            HooksEditorView(hooks: $model.hooks, unusedOutputs: Set(model.unusedHookOutputs))
+                            hooksSummary
+                            Button { showingHooksSheet = true } label: {
+                                Label("Edit hooks…", systemImage: "slider.horizontal.3")
+                            }
+                            .font(.callout).fontWeight(.regular)
                         }
                         .padding(.top, 4)
                     }
                     .font(.callout)
                     .fontWeight(.semibold)
+                    .sheet(isPresented: $showingHooksSheet) {
+                        HooksEditorSheet(hooks: $model.hooks,
+                                         unusedOutputs: Set(model.unusedHookOutputs),
+                                         isPresented: $showingHooksSheet)
+                    }
 
                     Button {
                         Task { await model.run() }
@@ -270,7 +291,7 @@ struct GlossView: View {
     @ViewBuilder
     private func field<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+            Text(label).font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
             content()
         }
     }
@@ -278,9 +299,45 @@ struct GlossView: View {
     /// A left-panel group divider so the required prompt block reads apart from optional pipeline steps.
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.caption2).fontWeight(.semibold).kerning(0.5)
+            .font(.caption).fontWeight(.semibold).kerning(0.5)
             .foregroundStyle(.secondary)
             .padding(.top, 4)
+    }
+
+    /// Compact read-only stand-in for the schema editor (now a sheet) — type name + field count.
+    private var schemaSummary: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "curlybraces").foregroundStyle(Theme.accent)
+            Text(model.customSchema.typeName.isEmpty ? "Output" : model.customSchema.typeName)
+                .fontWeight(.medium)
+            let n = model.customSchema.fields.count
+            Text("· \(n) field\(n == 1 ? "" : "s")").foregroundStyle(.secondary)
+        }
+        .font(.callout).fontWeight(.regular)
+        .padding(.vertical, 5).padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(radius: 8)
+    }
+
+    /// Compact read-only stand-in for the hooks editor (now a sheet) — counts + the unused-output ⚠︎
+    /// so the mis-wiring signal stays visible even while the editor is collapsed into the sheet.
+    private var hooksSummary: some View {
+        let pre = model.hooks.pre.count
+        let post = model.hooks.post.count
+        return HStack(spacing: 6) {
+            Image(systemName: "wand.and.stars").foregroundStyle(Theme.accent)
+            Text(pre + post == 0 ? "No hooks yet" : "\(pre) pre · \(post) post")
+                .fontWeight(.medium)
+            if !model.unusedHookOutputs.isEmpty {
+                Spacer()
+                Label("unused output", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(Theme.gold)
+            }
+        }
+        .font(.callout).fontWeight(.regular)
+        .padding(.vertical, 5).padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(radius: 8)
     }
 
     private func variableRow(key: String, value: Binding<String>) -> some View {
@@ -313,7 +370,7 @@ struct HooksEditorView: View {
     @ViewBuilder
     private func hookList(title: String, phase: HookPhase, list: Binding<[HookDef]>, defaultInput: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+            Text(title).font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
             ForEach(list) { $hook in
                 HookRow(hook: $hook, phase: phase, unusedOutputs: unusedOutputs) { list.wrappedValue.removeAll { $0.id == hook.id } }
             }
@@ -324,6 +381,31 @@ struct HooksEditorView: View {
             } label: { Label("Add \(phase == .pre ? "pre" : "post")-hook", systemImage: "plus.circle") }
                 .font(.caption).menuStyle(.borderlessButton).fixedSize()
         }
+    }
+}
+
+/// Hosts the hooks editor in a focused sheet — same rationale as SchemaEditorSheet: keep the heavy
+/// pre/post editor out of the left column so it reads as a compact summary there.
+struct HooksEditorSheet: View {
+    @Binding var hooks: HookPipelineDef
+    var unusedOutputs: Set<String> = []
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Hooks").font(.headline)
+                Spacer()
+                Button("Done") { isPresented = false }.keyboardShortcut(.defaultAction)
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                HooksEditorView(hooks: $hooks, unusedOutputs: unusedOutputs).padding(16)
+            }
+        }
+        .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 640)
+        .playgroundBackground()
     }
 }
 
@@ -367,13 +449,13 @@ private struct HookRow: View {
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
             }
-            Text(hook.op.detail).font(.caption2).foregroundStyle(.secondary)
+            Text(hook.op.detail).font(.caption).foregroundStyle(.secondary)
 
             HStack(spacing: 4) {
-                Text("in").font(.caption2).foregroundStyle(.tertiary)
+                Text("in").font(.caption).foregroundStyle(.tertiary)
                 TextField("var", text: $hook.inputVar).textFieldStyle(.roundedBorder).frame(width: 84)
-                Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-                Text("out").font(.caption2).foregroundStyle(.tertiary)
+                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
+                Text("out").font(.caption).foregroundStyle(.tertiary)
                 TextField("var", text: $hook.outputVar)
                     .textFieldStyle(.roundedBorder).frame(width: 84)
                     .overlay {
@@ -397,11 +479,11 @@ private struct HookRow: View {
                             .scrollContentBackground(.hidden)
                             .padding(4)
                             .glassCard(radius: 6)
-                        Text(p.placeholder).font(.caption2).foregroundStyle(.tertiary)
+                        Text(p.placeholder).font(.caption).foregroundStyle(.tertiary)
                     }
                 } else {
                     HStack(spacing: 4) {
-                        Text(p.label).font(.caption2).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
+                        Text(p.label).font(.caption).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
                         TextField(p.placeholder, text: param(p)).textFieldStyle(.roundedBorder).font(.caption)
                     }
                 }
