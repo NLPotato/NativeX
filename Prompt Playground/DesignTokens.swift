@@ -19,8 +19,9 @@ enum DS {
     enum Radius { static let sm: CGFloat = 6, md: CGFloat = 8, lg: CGFloat = 12 }
     enum Size {
         static let control: CGFloat = 28, controlLarge: CGFloat = 32
-        static let fieldMiniWidth: CGFloat = 88
-        static let panelMinWidth: CGFloat = 360, sheetMinWidth: CGFloat = 560
+        static let fieldMiniWidth: CGFloat = 88, fieldWideWidth: CGFloat = 220
+        static let panelMinWidth: CGFloat = 360, panelIdealWidth: CGFloat = 420
+        static let sheetMinWidth: CGFloat = 560, sheetIdealWidth: CGFloat = 620
     }
     enum Layout {
         static let paneInset = Space.xl, groupGap = Space.lg, fieldGap = Space.md
@@ -51,6 +52,7 @@ extension ShapeStyle where Self == Color {
     static var dsWarning: Color { Theme.gold }
     static var dsDanger:  Color { .red }
     static var dsSuccess: Color { Theme.accent }
+    static var dsInfo:    Color { Theme.cyan }   // neutral category accent (e.g. task badges)
 }
 
 // MARK: - Component chrome

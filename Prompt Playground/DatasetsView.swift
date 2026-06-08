@@ -29,9 +29,10 @@ struct DatasetsView: View {
     var body: some View {
         HSplitView {
             masterPane
-                .frame(minWidth: 260, idealWidth: 300)
+                .frame(minWidth: DS.Size.panelMinWidth - DS.Space.xxl * 3,
+                       idealWidth: DS.Size.panelMinWidth - DS.Space.xxl * 2)
             detailPane
-                .frame(minWidth: 380)
+                .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
         .onAppear { if selectedDatasetID == nil { selectedDatasetID = datasets.first?.id } }
@@ -68,9 +69,9 @@ struct DatasetsView: View {
 
     private var masterPane: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DS.Space.md) {
                 HStack {
-                    Text("Datasets").font(.headline)
+                    Text("Datasets").font(.dsTitle)
                     Spacer()
                     Button { showingNewDataset = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless)
@@ -78,28 +79,27 @@ struct DatasetsView: View {
                 }
                 if datasets.isEmpty {
                     Text("No datasets yet. Create one with +.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.dsBody).foregroundStyle(.secondary)
                 }
                 ForEach(datasets) { datasetRow($0) }
             }
-            .padding(16)
+            .padding(DS.Layout.paneInset)
         }
     }
 
     private func datasetRow(_ d: DatasetModel) -> some View {
         Button { selectedDatasetID = d.id } label: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
                 HStack {
-                    Text(d.name).font(.callout).fontWeight(.medium).lineLimit(1)
+                    Text(d.name).font(.dsBody).fontWeight(.medium).lineLimit(1)
                     Spacer()
                     taskBadge(d.task)
                 }
                 Text("\(d.examples.count) example\(d.examples.count == 1 ? "" : "s")")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .glassCard(highlighted: selectedDatasetID == d.id)
+            .dsCard(raised: selectedDatasetID == d.id)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -115,33 +115,33 @@ struct DatasetsView: View {
     private var detailPane: some View {
         ScrollView {
             if let d = selectedDataset {
-                examplesList(d).padding(16)
+                examplesList(d).padding(DS.Layout.paneInset)
             } else {
                 Text("Select a dataset to see and edit its examples, or create one with +.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBody).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                    .padding(DS.Layout.paneInset)
             }
         }
     }
 
     private func examplesList(_ d: DatasetModel) -> some View {
         let examples = d.examples.sorted { $0.createdAt < $1.createdAt }
-        return VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
                 HStack {
-                    Text(d.name).font(.headline)
+                    Text(d.name).font(.dsTitle)
                     taskBadge(d.task)
                     Spacer()
                     Button { editorTarget = .new(d) } label: { Label("Add example", systemImage: "plus") }
                 }
                 Text("\(examples.count) example\(examples.count == 1 ? "" : "s") · the test set when you run this dataset in the Lab tab.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.dsCaption).foregroundStyle(.secondary)
             }
 
             if examples.isEmpty {
                 Text("No examples yet. Add one with “Add example”.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBody).foregroundStyle(.secondary)
             }
             ForEach(examples) { exampleRow($0) }
         }
@@ -150,15 +150,14 @@ struct DatasetsView: View {
 
     private func exampleRow(_ ex: ExampleModel) -> some View {
         Button { editorTarget = .edit(ex) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ex.label).font(.callout).fontWeight(.medium)
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Text(ex.label).font(.dsBody).fontWeight(.medium)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(previewText(ex))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.dsCaption).foregroundStyle(.secondary).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(10)
-            .glassCard()
+            .dsCard()
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -210,13 +209,13 @@ struct DatasetsView: View {
     private func taskBadge(_ task: TaskKind) -> some View {
         let color: Color
         switch task {
-        case .gloss:    color = Theme.accent
-        case .roleplay: color = Theme.cyan
-        case .generic:  color = Theme.gold
+        case .gloss:    color = .dsAccent
+        case .roleplay: color = .dsInfo
+        case .generic:  color = .dsWarning
         }
         return Text(task.label)
-            .font(.caption2).fontWeight(.medium)
-            .padding(.horizontal, 7).padding(.vertical, 2)
+            .font(.dsMicro).fontWeight(.medium)
+            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
             .background(color.opacity(0.22), in: Capsule())
             .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.5))
     }
@@ -237,21 +236,26 @@ private struct NewDatasetSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("New dataset").font(.title3).fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                Text("New dataset").font(.dsTitle)
                 Text("A named set of test cases for one task. Run it in the Lab tab.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBody).foregroundStyle(.secondary)
             }
-            .padding([.horizontal, .top], 20)
+            .padding([.horizontal, .top], DS.Layout.paneInset)
 
-            Form {
-                Picker("Task", selection: $task) {
-                    ForEach(TaskKind.allCases) { Text($0.label).tag($0) }
+            VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                DSField(label: "Task") {
+                    Picker("", selection: $task) {
+                        ForEach(TaskKind.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                TextField("Dataset name", text: $name)
+                DSField(label: "Dataset name") {
+                    TextField("", text: $name).dsTextField()
+                }
             }
-            .formStyle(.grouped)
+            .padding(DS.Layout.paneInset)
 
             Divider()
             HStack {
@@ -262,9 +266,9 @@ private struct NewDatasetSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(trimmed.isEmpty)
             }
-            .padding(16)
+            .padding(DS.Layout.groupGap)
         }
-        .frame(width: 460, height: 240)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: DS.Size.sheetIdealWidth)
     }
 
     private func create() {
@@ -335,24 +339,26 @@ struct ExampleEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(isEditing ? "Edit example" : "New example").font(.title3).fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                Text(isEditing ? "Edit example" : "New example").font(.dsTitle)
                 Text("\(task.label) test case — the input a Lab experiment runs against.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBody).foregroundStyle(.secondary)
             }
-            .padding([.horizontal, .top], 20)
+            .padding([.horizontal, .top], DS.Layout.paneInset)
 
-            Form {
-                Section("Label") {
-                    TextField("Short name for this case", text: $label)
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+                    DSField(label: "Label", help: "Short name for this case") {
+                        TextField("", text: $label).dsTextField()
+                    }
+                    switch task {
+                    case .gloss: glossFields
+                    case .roleplay: roleplayFields
+                    case .generic: genericFields
+                    }
                 }
-                switch task {
-                case .gloss: glossFields
-                case .roleplay: roleplayFields
-                case .generic: genericFields
-                }
+                .padding(DS.Layout.paneInset)
             }
-            .formStyle(.grouped)
 
             Divider()
             HStack {
@@ -363,39 +369,61 @@ struct ExampleEditorSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!canSave)
             }
-            .padding(16)
+            .padding(DS.Layout.groupGap)
         }
-        .frame(width: 520, height: task == .gloss ? 440 : 640)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: DS.Size.sheetIdealWidth,
+               minHeight: task == .gloss ? 440 : 640)
         .onAppear(perform: load)
     }
 
     @ViewBuilder private var glossFields: some View {
-        Section("Gloss input") {
-            TextField("Sentence to analyze", text: $sentence, axis: .vertical).lineLimit(1...4)
-            TextField("Learning language (e.g. German)", text: $learning)
-            TextField("Native language (e.g. English)", text: $native)
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Gloss input")
+            DSField(label: "Sentence to analyze") {
+                TextEditor(text: $sentence).font(.dsBody).dsEditor(lines: 3)
+            }
+            DSField(label: "Learning language", help: "e.g. German") {
+                TextField("", text: $learning).dsTextField()
+            }
+            DSField(label: "Native language", help: "e.g. English") {
+                TextField("", text: $native).dsTextField()
+            }
         }
     }
 
     @ViewBuilder private var roleplayFields: some View {
-        Section("Languages") {
-            TextField("Learning language", text: $learning)
-            TextField("Native language", text: $native)
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Languages")
+            DSField(label: "Learning language") {
+                TextField("", text: $learning).dsTextField()
+            }
+            DSField(label: "Native language") {
+                TextField("", text: $native).dsTextField()
+            }
         }
-        Section("Scene") {
-            TextField("Situation", text: $situation, axis: .vertical).lineLimit(1...3)
-            TextField("Your role", text: $youRole)
-            TextField("AI role", text: $aiRole)
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Scene")
+            DSField(label: "Situation") {
+                TextEditor(text: $situation).font(.dsBody).dsEditor(lines: 3)
+            }
+            DSField(label: "Your role") {
+                TextField("", text: $youRole).dsTextField()
+            }
+            DSField(label: "AI role") {
+                TextField("", text: $aiRole).dsTextField()
+            }
             Stepper("Max AI turns: \(maxTurns)", value: $maxTurns, in: 1...12)
+                .font(.dsLabel)
         }
-        Section("Scripted user turns") {
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Scripted user turns")
             if turns.isEmpty {
                 Text("No scripted turns — the runner auto-advances on the first suggestion.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.dsCaption).foregroundStyle(.secondary)
             }
             ForEach($turns) { $t in
-                HStack {
-                    TextField("User turn", text: $t.text)
+                HStack(spacing: DS.Space.sm) {
+                    TextField("", text: $t.text).dsTextField()
                     Button(role: .destructive) { turns.removeAll { $0.id == t.id } } label: {
                         Image(systemName: "minus.circle")
                     }
@@ -407,19 +435,23 @@ struct ExampleEditorSheet: View {
     }
 
     @ViewBuilder private var genericFields: some View {
-        Section("Prompt") {
-            TextField("Prompt sent to the model", text: $genInput, axis: .vertical).lineLimit(1...5)
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Prompt")
+            DSField(label: "Prompt sent to the model") {
+                TextEditor(text: $genInput).font(.dsBody).dsEditor(lines: 5)
+            }
         }
-        Section("Variables") {
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Variables")
             if genVars.isEmpty {
                 Text("No variables. Add the {{name}} values this prompt's instructions or pre-hooks expect.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.dsCaption).foregroundStyle(.secondary)
             }
             ForEach($genVars) { $v in
-                HStack(spacing: 6) {
-                    TextField("name", text: $v.key).frame(width: 120)
-                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-                    TextField("value", text: $v.value)
+                HStack(spacing: DS.Space.sm) {
+                    TextField("name", text: $v.key).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                    Image(systemName: "arrow.right").font(.dsMicro).foregroundStyle(.tertiary)
+                    TextField("value", text: $v.value).dsTextField()
                     Button(role: .destructive) { genVars.removeAll { $0.id == v.id } } label: {
                         Image(systemName: "minus.circle")
                     }

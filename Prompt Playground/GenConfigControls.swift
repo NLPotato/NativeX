@@ -14,11 +14,13 @@ struct GenConfigControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            Toggle("Greedy (deterministic)", isOn: greedy)
+            Toggle(isOn: greedy) {
+                Text("Greedy (deterministic)").font(.dsLabel)
+            }
             Toggle(isOn: temperatureOn) {
                 HStack {
-                    Text("Temperature")
-                    if let t = config.temperature { Text(String(format: "%.2f", t)).foregroundStyle(.secondary) }
+                    Text("Temperature").font(.dsLabel)
+                    if let t = config.temperature { Text(String(format: "%.2f", t)).font(.dsMicro).foregroundStyle(.secondary) }
                 }
             }
             if config.temperature != nil {
@@ -26,12 +28,14 @@ struct GenConfigControls: View {
             }
             Toggle(isOn: maxTokensOn) {
                 HStack {
-                    Text("Max response tokens")
-                    if let m = config.maximumResponseTokens { Text("\(m)").foregroundStyle(.secondary) }
+                    Text("Max response tokens").font(.dsLabel)
+                    if let m = config.maximumResponseTokens { Text("\(m)").font(.dsMicro).foregroundStyle(.secondary) }
                 }
             }
             if config.maximumResponseTokens != nil {
-                Stepper("\(config.maximumResponseTokens ?? 512)", value: maxTokens, in: 64...4096, step: 64)
+                Stepper(value: maxTokens, in: 64...4096, step: 64) {
+                    Text("\(config.maximumResponseTokens ?? 512)").font(.dsMicro)
+                }
             }
         }
         .font(.dsBody)

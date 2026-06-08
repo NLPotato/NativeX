@@ -79,83 +79,98 @@ struct SaveToPipelineSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Save to Lab").font(.title3).fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                Text("Save to Lab").font(.dsTitle)
                 Text("Promote what you just tried into reusable Lab templates and test cases.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsCaption).foregroundStyle(.tertiary)
             }
-            .padding([.horizontal, .top], 20)
+            .padding([.horizontal, .top], DS.Layout.paneInset)
 
-            Form {
-                Section("Prompt template") {
-                    Toggle("Save prompt as a template version", isOn: $saveTemplate)
-                    if saveTemplate {
-                        TextField("Template name", text: $templateName)
-                        Text(trimmedTemplateName.isEmpty
-                             ? "Enter a name."
-                             : "Saves as “\(trimmedTemplateName) v\(nextVersion)” for the \(task.label) task.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if !hooks.isEmpty {
-                            Text("Includes \(hooks.pre.count) pre + \(hooks.post.count) post hook\(hooks.pre.count + hooks.post.count == 1 ? "" : "s") — replayed in the Lab.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Dataset example") {
-                    Toggle("Add input as a dataset example", isOn: $saveExample)
-                        .disabled(!canSaveExample)
-                    if saveExample && canSaveExample {
-                        TextField("Example label", text: $exampleLabel)
-                        Picker("Dataset", selection: $datasetChoice) {
-                            ForEach(datasets) { d in
-                                Text("\(d.name) (\(d.examples.count))").tag(DatasetChoice.existing(d.id))
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+                    VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                        DSSectionHeader("Prompt template")
+                        Toggle("Save prompt as a template version", isOn: $saveTemplate)
+                        if saveTemplate {
+                            DSField(label: "Template name",
+                                    help: trimmedTemplateName.isEmpty
+                                        ? "Enter a name."
+                                        : "Saves as “\(trimmedTemplateName) v\(nextVersion)” for the \(task.label) task.") {
+                                TextField("", text: $templateName).dsTextField()
                             }
-                            Text("New dataset…").tag(DatasetChoice.new)
-                        }
-                        if datasetChoice == .new {
-                            TextField("New dataset name", text: $newDatasetName)
-                        }
-                    }
-                    Text(canSaveExample ? exampleHint : "Fill in the input first to capture it as an example.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                if schemaDef != nil {
-                    Section("Output schema") {
-                        Toggle("Save schema as a version", isOn: $saveSchema)
-                        if saveSchema {
-                            TextField("Schema name", text: $schemaName)
-                            Text(trimmedSchemaName.isEmpty
-                                 ? "Enter a name."
-                                 : "Saves as “\(trimmedSchemaName) v\(nextSchemaVersion)” — persists for dynamic batch eval in the Lab tab.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            if !hooks.isEmpty {
+                                Text("Includes \(hooks.pre.count) pre + \(hooks.post.count) post hook\(hooks.pre.count + hooks.post.count == 1 ? "" : "s") — replayed in the Lab.")
+                                    .font(.dsCaption).foregroundStyle(.secondary)
+                            }
                         }
                     }
 
-                    Section("Swift @Generable") {
-                        Text("Paste into the app target to promote this prototype to the typed shipping lane.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ScrollView {
-                            Text(generatedSwift)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                        DSSectionHeader("Dataset example")
+                        Toggle("Add input as a dataset example", isOn: $saveExample)
+                            .disabled(!canSaveExample)
+                        if saveExample && canSaveExample {
+                            DSField(label: "Example label") {
+                                TextField("", text: $exampleLabel).dsTextField()
+                            }
+                            DSField(label: "Dataset") {
+                                Picker("", selection: $datasetChoice) {
+                                    ForEach(datasets) { d in
+                                        Text("\(d.name) (\(d.examples.count))").tag(DatasetChoice.existing(d.id))
+                                    }
+                                    Text("New dataset…").tag(DatasetChoice.new)
+                                }
+                                .labelsHidden()
+                            }
+                            if datasetChoice == .new {
+                                DSField(label: "New dataset name") {
+                                    TextField("", text: $newDatasetName).dsTextField()
+                                }
+                            }
                         }
-                        .frame(height: 150)
-                        .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                        HStack {
-                            Button { copySwift() } label: { Label("Copy Swift", systemImage: "doc.on.doc") }
-                            Button { saveSwiftFile() } label: { Label("Save .swift to Documents…", systemImage: "square.and.arrow.down") }
+                        Text(canSaveExample ? exampleHint : "Fill in the input first to capture it as an example.")
+                            .font(.dsCaption).foregroundStyle(.tertiary)
+                    }
+
+                    if schemaDef != nil {
+                        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                            DSSectionHeader("Output schema")
+                            Toggle("Save schema as a version", isOn: $saveSchema)
+                            if saveSchema {
+                                DSField(label: "Schema name",
+                                        help: trimmedSchemaName.isEmpty
+                                            ? "Enter a name."
+                                            : "Saves as “\(trimmedSchemaName) v\(nextSchemaVersion)” — persists for dynamic batch eval in the Lab tab.") {
+                                    TextField("", text: $schemaName).dsTextField()
+                                }
+                            }
                         }
-                        .font(.caption)
-                        if let n = exportNote { Text(n).font(.caption2).foregroundStyle(.green) }
-                        Text("Array counts aren’t emitted as hard guides — tune as @Guide after pasting.")
-                            .font(.caption2).foregroundStyle(.tertiary)
+
+                        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                            DSSectionHeader("Swift @Generable")
+                            Text("Paste into the app target to promote this prototype to the typed shipping lane.")
+                                .font(.dsCaption).foregroundStyle(.tertiary)
+                            ScrollView {
+                                Text(generatedSwift)
+                                    .font(.dsCode)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(height: DS.lineHeight * 7)
+                            .dsFlat()
+                            HStack {
+                                Button { copySwift() } label: { Label("Copy Swift", systemImage: "doc.on.doc") }
+                                Button { saveSwiftFile() } label: { Label("Save .swift to Documents…", systemImage: "square.and.arrow.down") }
+                            }
+                            .font(.dsCaption)
+                            if let n = exportNote { Text(n).font(.dsMicro).foregroundStyle(.dsSuccess) }
+                            Text("Array counts aren’t emitted as hard guides — tune as @Guide after pasting.")
+                                .font(.dsMicro).foregroundStyle(.tertiary)
+                        }
                     }
                 }
+                .padding(DS.Layout.paneInset)
             }
-            .formStyle(.grouped)
 
             Divider()
             HStack {
@@ -166,9 +181,10 @@ struct SaveToPipelineSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!canSave)
             }
-            .padding(16)
+            .padding(DS.Layout.groupGap)
         }
-        .frame(width: 520, height: schemaDef != nil ? 660 : 470)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: DS.Size.sheetIdealWidth,
+               minHeight: schemaDef != nil ? 660 : 470)
         .onAppear(perform: load)
     }
 

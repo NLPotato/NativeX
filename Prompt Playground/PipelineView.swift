@@ -48,9 +48,9 @@ struct PipelineView: View {
     var body: some View {
         HSplitView {
             configPane
-                .frame(minWidth: 320, idealWidth: 360)
+                .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth)
             detailPane
-                .frame(minWidth: 380)
+                .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
         .onAppear(perform: syncSelections)
@@ -63,10 +63,10 @@ struct PipelineView: View {
 
     private var configPane: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
                 if let msg = ModelAvailability.message {
                     Label(msg, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.orange)
+                        .font(.dsBody).foregroundStyle(.dsWarning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -75,14 +75,14 @@ struct PipelineView: View {
                 }
                 .pickerStyle(.segmented)
 
-                labeled("Dataset") {
+                DSField(label: "Dataset") {
                     Picker("Dataset", selection: $selectedDatasetID) {
                         ForEach(datasets) { Text("\($0.name) (\($0.examples.count))").tag(Optional($0.id)) }
                     }
                     .labelsHidden()
                 }
 
-                labeled("Prompt template") {
+                DSField(label: "Prompt template") {
                     Picker("Template", selection: $selectedTemplateID) {
                         ForEach(templates) { Text("\($0.name) v\($0.version)").tag(Optional($0.id)) }
                     }
@@ -91,14 +91,13 @@ struct PipelineView: View {
 
                 if let t = selectedTemplate {
                     Text(t.instructions)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.dsCode)
                         .foregroundStyle(.secondary)
                         .lineLimit(4)
-                        .padding(8)
-                        .codeSurface()
+                        .dsFlat()
                 }
 
-                labeled("Output schema") {
+                DSField(label: "Output schema") {
                     Picker("Schema", selection: $selectedSchemaID) {
                         Text("Typed (built-in)").tag(UUID?.none)
                         ForEach(schemas) { Text("\($0.name) v\($0.version)").tag(Optional($0.id)) }
@@ -109,7 +108,7 @@ struct PipelineView: View {
                 genConfigControls
 
                 Button(action: run) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DS.Space.sm) {
                         if runner.isRunning { ProgressView().controlSize(.small) }
                         Text(runner.isRunning ? "Running \(runner.completed)/\(runner.total)…" : "Run experiment")
                     }
@@ -120,39 +119,39 @@ struct PipelineView: View {
                 .disabled(runner.isRunning || !ModelAvailability.isAvailable || selectedDataset == nil || selectedTemplate == nil)
 
                 if runner.isRunning {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DS.Space.xs) {
                         ProgressView(value: runner.progress)
-                        Text(runner.currentLabel).font(.caption).foregroundStyle(.secondary)
+                        Text(runner.currentLabel).font(.dsCaption).foregroundStyle(.secondary)
                         Button("Cancel") { runner.cancel() }.controlSize(.small)
                     }
                 }
 
-                Divider().padding(.vertical, 4)
+                Divider().padding(.vertical, DS.Space.xs)
 
                 HStack {
-                    Text("Experiments").font(.headline)
+                    DSSectionHeader("Experiments")
                     Spacer()
                     if !experiments.isEmpty {
                         Picker("", selection: $rankByScore) {
                             Text("Recent").tag(false)
                             Text("Top score").tag(true)
                         }
-                        .pickerStyle(.segmented).labelsHidden().frame(width: 150)
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
                     }
                 }
                 if experiments.isEmpty {
                     Text("No runs yet. Configure a variant and press Run.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.dsBody).foregroundStyle(.secondary)
                 }
                 ForEach(displayedExperiments) { exp in experimentRow(exp) }
             }
-            .padding(16)
+            .padding(DS.Layout.paneInset)
         }
     }
 
     private var genConfigControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Generation config").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSSectionHeader("Generation config")
             GenConfigControls(config: $config)
         }
     }
@@ -162,23 +161,22 @@ struct PipelineView: View {
         return Button {
             selectedExperimentID = exp.id
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 HStack {
-                    Text(exp.variantLabel).font(.callout).fontWeight(.medium).lineLimit(1)
+                    Text(exp.variantLabel).font(.dsBody).fontWeight(.medium).lineLimit(1)
                     Spacer()
                     statusTag(exp.status)
                 }
-                HStack(spacing: 10) {
+                HStack(spacing: DS.Space.md) {
                     Text(exp.task.label)
                     Text(String(format: "score %.0f", stats.meanComposite))
                     Text(String(format: "decode %.0f%%", stats.decodeRate * 100))
                     Text("n=\(exp.runs.count)")
                 }
-                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .glassCard(highlighted: selectedExperimentID == exp.id)
+            .dsCard(raised: selectedExperimentID == exp.id)
         }
         .buttonStyle(.plain)
     }
@@ -189,12 +187,12 @@ struct PipelineView: View {
         ScrollView {
             if let exp = selectedExperiment {
                 ExperimentDetail(experiment: exp)
-                    .padding(16)
+                    .padding(DS.Layout.paneInset)
             } else {
                 Text("Select an experiment to see its runs, metrics, and golden-readiness.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.dsBody).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                    .padding(DS.Layout.paneInset)
             }
         }
     }
@@ -227,19 +225,11 @@ struct PipelineView: View {
         }
     }
 
-    @ViewBuilder
-    private func labeled<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
-            content()
-        }
-    }
-
     private func statusTag(_ status: String) -> some View {
-        let color: Color = status == "done" ? Theme.accent : status == "cancelled" ? Theme.gold : Theme.cyan
+        let color: Color = status == "done" ? .dsSuccess : status == "cancelled" ? .dsWarning : .dsInfo
         return Text(status)
-            .font(.caption2).fontWeight(.medium)
-            .padding(.horizontal, 7).padding(.vertical, 2)
+            .font(.dsMicro).fontWeight(.medium)
+            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
             .background(color.opacity(0.22), in: Capsule())
             .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.5))
     }
@@ -270,16 +260,16 @@ private struct ExperimentDetail: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(experiment.variantLabel).font(.headline)
+        VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Text(experiment.variantLabel).font(.dsTitle)
                 Text("\(experiment.task.label) · dataset “\(experiment.datasetName)” · schema \(experiment.schemaID)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.dsCaption).foregroundStyle(.secondary)
             }
 
             HStack {
                 Button(action: runJudge) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DS.Space.sm) {
                         if isJudging { ProgressView().controlSize(.small) }
                         Image(systemName: "gavel")
                         Text(isJudging ? "Judging \(judgeDone)/\(judgeTotal)…" : "Run LLM judge")
@@ -299,13 +289,13 @@ private struct ExperimentDetail: View {
                 .disabled(experiment.runs.allSatisfy { !$0.decoded })
             }
             if let msg = exportMessage {
-                Text(msg).font(.caption).foregroundStyle(.secondary)
+                Text(msg).font(.dsCaption).foregroundStyle(.secondary)
             }
 
             scorecard
             readiness
 
-            Text("Runs").font(.headline)
+            DSSectionHeader("Runs")
             ForEach(runs) { RunRow(run: $0) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -329,8 +319,8 @@ private struct ExperimentDetail: View {
     }
 
     private var scorecard: some View {
-        let cols = [GridItem(.adaptive(minimum: 130), alignment: .leading)]
-        return LazyVGrid(columns: cols, alignment: .leading, spacing: 8) {
+        let cols = [GridItem(.adaptive(minimum: DS.Size.fieldWideWidth), alignment: .leading)]
+        return LazyVGrid(columns: cols, alignment: .leading, spacing: DS.Space.sm) {
             stat("Mean score", String(format: "%.1f", stats.meanComposite))
             stat("Decode rate", String(format: "%.0f%%", stats.decodeRate * 100))
             if let l = stats.meanOnTargetLanguage { stat("On-target lang", String(format: "%.2f", l)) }
@@ -349,30 +339,29 @@ private struct ExperimentDetail: View {
     private var readiness: some View {
         let checks = GoldenThresholds.evaluate(stats, task: experiment.task)
         let golden = checks.allSatisfy(\.pass)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        return VStack(alignment: .leading, spacing: DS.Space.sm) {
+            HStack(spacing: DS.Space.sm) {
                 Image(systemName: golden ? "checkmark.seal.fill" : "seal")
-                    .foregroundStyle(golden ? .green : .secondary)
-                Text(golden ? "Golden-ready" : "Not yet golden").font(.subheadline).fontWeight(.medium)
+                    .foregroundStyle(golden ? AnyShapeStyle(.dsSuccess) : AnyShapeStyle(.secondary))
+                Text(golden ? "Golden-ready" : "Not yet golden").font(.dsLabel).fontWeight(.medium)
             }
             ForEach(checks) { c in
-                HStack(spacing: 6) {
+                HStack(spacing: DS.Space.sm) {
                     Image(systemName: c.pass ? "checkmark.circle.fill" : "xmark.circle")
-                        .foregroundStyle(c.pass ? .green : .red).font(.caption)
-                    Text(c.name).font(.caption)
+                        .foregroundStyle(c.pass ? AnyShapeStyle(.dsSuccess) : AnyShapeStyle(.dsDanger)).font(.dsCaption)
+                    Text(c.name).font(.dsCaption)
                     Spacer()
-                    Text(c.detail).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text(c.detail).font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(12)
-        .glassCard()
+        .dsCard()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.callout.monospacedDigit())
+        VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            Text(label).font(.dsMicro).foregroundStyle(.secondary)
+            Text(value).font(.dsBody.monospacedDigit())
         }
     }
 }
@@ -385,24 +374,24 @@ private struct RunRow: View {
     private var judge: JudgeScore? { JSONCoder.decode(JudgeScore.self, run.judgeJSON) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack {
                 Image(systemName: run.decoded ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(run.decoded ? .green : .red)
-                Text(run.exampleLabel).font(.callout).lineLimit(1)
+                    .foregroundStyle(run.decoded ? AnyShapeStyle(.dsSuccess) : AnyShapeStyle(.dsDanger))
+                Text(run.exampleLabel).font(.dsBody).lineLimit(1)
                 Spacer()
-                Text(String(format: "%.0f", run.composite)).font(.callout.monospacedDigit())
+                Text(String(format: "%.0f", run.composite)).font(.dsBody.monospacedDigit())
             }
-            HStack(spacing: 10) {
+            HStack(spacing: DS.Space.md) {
                 Text("ctx \(run.contextTokensEst) (\(run.contextHeadroom) left)")
                 Text("\(run.latencyMs) ms")
                 if let l = run.onTargetLanguage { Text(String(format: "lang %.2f", l)) }
                 if let j = judge { Text(String(format: "judge %.1f", j.mean)) }
             }
-            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            .font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary)
 
-            HStack(spacing: 6) {
-                Text("Your rating").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: DS.Space.sm) {
+                Text("Your rating").font(.dsCaption).foregroundStyle(.secondary)
                 Picker("", selection: Binding(
                     get: { run.manualRating ?? 0 },
                     set: { run.manualRating = ($0 == 0 ? nil : $0); try? context.save() }
@@ -410,28 +399,26 @@ private struct RunRow: View {
                     Text("–").tag(0)
                     ForEach(1...5, id: \.self) { Text("\($0)").tag($0) }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
 
             if let err = run.errorText {
-                Text(err).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(err).font(.dsCaption).foregroundStyle(.dsDanger).fixedSize(horizontal: false, vertical: true)
             }
             if let j = judge {
-                Text("Judge: \(j.rationale)").font(.caption).foregroundStyle(.secondary)
+                Text("Judge: \(j.rationale)").font(.dsCaption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             DisclosureGroup("Output", isExpanded: $expanded) {
                 Text(run.turnsJSON ?? run.outputJSON)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.dsCode)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .codeSurface()
+                    .dsFlat()
             }
-            .font(.caption)
+            .font(.dsCaption)
         }
-        .padding(12)
-        .glassCard()
+        .dsCard()
     }
 }

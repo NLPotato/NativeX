@@ -15,7 +15,7 @@ struct ContentView: View {
             PipelineView()   // "Lab" tab; type/file kept as Pipeline* (see CLAUDE.md naming note)
                 .tabItem { Label("Lab", systemImage: "chart.bar.doc.horizontal") }
         }
-        .tint(Theme.accent)
+        .tint(Color.dsAccent)
         .preferredColorScheme(.dark)
         .task { SeedData.seedIfNeeded(context) }
     }
@@ -193,7 +193,7 @@ struct GlossView: View {
                             Button { showingHooksSheet = true } label: {
                                 Label("Edit hooks…", systemImage: "slider.horizontal.3")
                             }
-                            .font(.dsBody).fontWeight(.regular)
+                            .font(.dsBody)
                         }
                         .padding(.top, DS.Space.xs)
                     }
@@ -250,7 +250,7 @@ struct GlossView: View {
                 }
                 .padding(DS.Space.xl)
             }
-            .frame(minWidth: DS.Size.panelMinWidth, idealWidth: 420)
+            .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth)
 
             // OUTPUT — the run as live pipeline stages.
             ScrollView {
@@ -294,9 +294,9 @@ struct GlossView: View {
     /// Compact read-only stand-in for the schema editor (now a sheet) — type name + field count.
     private var schemaSummary: some View {
         HStack(spacing: DS.Space.sm) {
-            Image(systemName: "curlybraces").foregroundStyle(Theme.accent)
+            Image(systemName: "curlybraces").foregroundStyle(.dsAccent)
             Text(model.customSchema.typeName.isEmpty ? "Output" : model.customSchema.typeName)
-                .fontWeight(.medium)
+                .font(.dsLabel)
             let n = model.customSchema.fields.count
             Text("· \(n) field\(n == 1 ? "" : "s")").foregroundStyle(.secondary)
         }
@@ -312,9 +312,9 @@ struct GlossView: View {
         let pre = model.hooks.pre.count
         let post = model.hooks.post.count
         return HStack(spacing: DS.Space.sm) {
-            Image(systemName: "wand.and.stars").foregroundStyle(Theme.accent)
+            Image(systemName: "wand.and.stars").foregroundStyle(.dsAccent)
             Text(pre + post == 0 ? "No hooks yet" : "\(pre) pre · \(post) post")
-                .fontWeight(.medium)
+                .font(.dsLabel)
             if !model.unusedHookOutputs.isEmpty {
                 Spacer()
                 Label("unused output", systemImage: "exclamationmark.triangle.fill")
@@ -333,7 +333,7 @@ struct GlossView: View {
                 .font(.dsCode)
                 .foregroundStyle(.dsAccent)
                 .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+                .background(Color.dsAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
             Image(systemName: "arrow.right").font(.dsMicro).foregroundStyle(.tertiary)
             TextField("value", text: value).dsTextField()
         }
@@ -391,7 +391,7 @@ struct HooksEditorSheet: View {
                 HooksEditorView(hooks: $hooks, unusedOutputs: unusedOutputs).padding(DS.Space.xl)
             }
         }
-        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: 600, minHeight: 480, idealHeight: 640)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: DS.Size.sheetIdealWidth, minHeight: 480, idealHeight: 640)
         .playgroundBackground()
     }
 }
@@ -420,7 +420,7 @@ private struct HookRow: View {
     /// Accent when the out var is consumed, gold when nothing reads it; nil for post / empty.
     private var outVarColor: Color? {
         guard phase == .pre, !hook.outputVar.isEmpty else { return nil }
-        return outVarUnused ? Theme.gold : Theme.accent
+        return outVarUnused ? Color.dsWarning : Color.dsAccent
     }
 
     var body: some View {
@@ -438,24 +438,28 @@ private struct HookRow: View {
             }
             Text(hook.op.detail).font(.dsCaption).foregroundStyle(.secondary)
 
-            HStack(spacing: DS.Space.xs) {
-                Text("in").font(.dsCaption).foregroundStyle(.tertiary)
-                TextField("var", text: $hook.inputVar).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+            HStack(alignment: .bottom, spacing: DS.Space.sm) {
+                DSField(label: "in") {
+                    TextField("var", text: $hook.inputVar)
+                        .dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                }
                 Image(systemName: "arrow.right").font(.dsCaption).foregroundStyle(.tertiary)
-                Text("out").font(.dsCaption).foregroundStyle(.tertiary)
-                TextField("var", text: $hook.outputVar)
-                    .dsTextField().frame(width: DS.Size.fieldMiniWidth)
-                    .overlay {
-                        if let c = outVarColor {
-                            RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(c, lineWidth: 1)
+                    .padding(.bottom, DS.Space.sm)
+                DSField(label: "out") {
+                    TextField("var", text: $hook.outputVar)
+                        .dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                        .overlay {
+                            if let c = outVarColor {
+                                RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(c, lineWidth: 1)
+                            }
                         }
-                    }
+                }
                 if outVarUnused {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.dsMicro).foregroundStyle(.dsWarning)
+                        .padding(.bottom, DS.Space.sm)
                 }
             }
-            .font(.dsCode)
 
             ForEach(hook.op.paramKeys, id: \.self) { p in
                 if p == .command {
@@ -466,8 +470,7 @@ private struct HookRow: View {
                         Text(p.placeholder).font(.dsCaption).foregroundStyle(.tertiary)
                     }
                 } else {
-                    HStack(spacing: DS.Space.xs) {
-                        Text(p.label).font(.dsCaption).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
+                    DSField(label: p.label) {
                         TextField(p.placeholder, text: param(p)).dsTextField()
                     }
                 }
@@ -481,8 +484,8 @@ private struct HookRow: View {
         Text(p.label)
             .font(.dsMicro)
             .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
-            .background((p.isPortable ? Theme.accent : Theme.gold).opacity(0.18), in: Capsule())
-            .foregroundStyle(p.isPortable ? Theme.accent : Theme.gold)
+            .background((p.isPortable ? Color.dsAccent : Color.dsWarning).opacity(0.18), in: Capsule())
+            .foregroundStyle(p.isPortable ? Color.dsAccent : Color.dsWarning)
     }
 }
 

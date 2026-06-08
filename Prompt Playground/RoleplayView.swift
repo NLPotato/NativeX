@@ -39,11 +39,11 @@ struct RoleplayView: View {
         HSplitView {
             // SCENE SETUP
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
                     if let msg = model.availabilityMessage {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(.orange)
+                            .font(.dsBody)
+                            .foregroundStyle(.dsWarning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
@@ -58,57 +58,58 @@ struct RoleplayView: View {
                         .disabled(model.hasStarted)
                     }
 
-                    HStack(alignment: .top, spacing: 10) {
-                        field("Learning language") {
-                            TextField("e.g. Korean", text: $model.learning)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(model.hasStarted)
-                        }
-                        field("Native language") {
-                            TextField("e.g. English", text: $model.native)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(model.hasStarted)
-                        }
-                    }
+                    DSSectionHeader("Scene")
 
-                    field("Situation") {
-                        TextField("The scene / setting", text: $model.situation, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(1...4)
-                            .disabled(model.hasStarted)
-                    }
+                    VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+                        HStack(alignment: .top, spacing: DS.Space.md) {
+                            DSField(label: "Learning language") {
+                                TextField("e.g. Korean", text: $model.learning)
+                                    .dsTextField()
+                                    .disabled(model.hasStarted)
+                            }
+                            DSField(label: "Native language") {
+                                TextField("e.g. English", text: $model.native)
+                                    .dsTextField()
+                                    .disabled(model.hasStarted)
+                            }
+                        }
 
-                    HStack(alignment: .top, spacing: 10) {
-                        field("Your role") {
-                            TextField("Who you play", text: $model.youRole)
-                                .textFieldStyle(.roundedBorder)
+                        DSField(label: "Situation") {
+                            TextField("The scene / setting", text: $model.situation, axis: .vertical)
+                                .dsTextField()
+                                .lineLimit(1...4)
                                 .disabled(model.hasStarted)
                         }
-                        field("AI's role") {
-                            TextField("Who the AI plays", text: $model.aiRole)
-                                .textFieldStyle(.roundedBorder)
+
+                        HStack(alignment: .top, spacing: DS.Space.md) {
+                            DSField(label: "Your role") {
+                                TextField("Who you play", text: $model.youRole)
+                                    .dsTextField()
+                                    .disabled(model.hasStarted)
+                            }
+                            DSField(label: "AI's role") {
+                                TextField("Who the AI plays", text: $model.aiRole)
+                                    .dsTextField()
+                                    .disabled(model.hasStarted)
+                            }
+                        }
+
+                        DSField(label: "Instructions",
+                                help: "Placeholders: {{learning}} {{native}} {{situation}} {{you}} {{ai}} — resolved at Start.") {
+                            TextEditor(text: $model.instructions)
+                                .font(.dsCode)
+                                .dsEditor(lines: 7)
                                 .disabled(model.hasStarted)
                         }
-                    }
-
-                    field("Instructions") {
-                        TextEditor(text: $model.instructions)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 150)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                            .disabled(model.hasStarted)
-                        Text("Placeholders: {{learning}} {{native}} {{situation}} {{you}} {{ai}} — resolved at Start.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     DisclosureGroup("Generation config") {
-                        GenConfigControls(config: $model.config).padding(.top, 4).disabled(model.hasStarted)
+                        GenConfigControls(config: $model.config).padding(.top, DS.Space.xs).disabled(model.hasStarted)
                     }
-                    .font(.callout)
+                    .font(.dsBody)
 
                     DisclosureGroup("Output schema") {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: DS.Space.sm) {
                             Toggle("Use a custom schema (run dynamically)", isOn: $model.useCustomSchema)
                                 .disabled(model.hasStarted)
                             if model.useCustomSchema {
@@ -118,19 +119,19 @@ struct RoleplayView: View {
                                             Button("\(s.name) v\(s.version)") { if let d = s.def { model.customSchema = d } }
                                         }
                                     } label: { Label("Load saved schema", systemImage: "tray.and.arrow.up") }
-                                    .font(.caption).fixedSize().disabled(model.hasStarted)
+                                    .font(.dsCaption).fixedSize().disabled(model.hasStarted)
                                 }
                                 SchemaEditorView(def: $model.customSchema).disabled(model.hasStarted)
                                 Text("Custom turns show raw JSON (no tappable suggestions). Save + export Swift from “Save to Lab…”.")
-                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .font(.dsMicro).foregroundStyle(.secondary)
                             } else {
                                 Text("Using the typed RoleplayTurnGen (tappable suggestions + typed metrics).")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, DS.Space.xs)
                     }
-                    .font(.callout)
+                    .font(.dsBody)
 
                     if model.hasStarted {
                         Button(role: .destructive) {
@@ -144,7 +145,7 @@ struct RoleplayView: View {
                         Button {
                             Task { await model.start() }
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: DS.Space.sm) {
                                 if model.isRunning { ProgressView().controlSize(.small) }
                                 Text(model.isRunning ? "Starting…" : "Start")
                             }
@@ -181,24 +182,26 @@ struct RoleplayView: View {
 
                     if let msg = savedMessage {
                         Label(msg, systemImage: "checkmark.circle.fill")
-                            .font(.caption).foregroundStyle(.green)
+                            .font(.dsCaption).foregroundStyle(.dsSuccess)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(16)
+                .padding(DS.Layout.paneInset)
             }
-            .frame(minWidth: 340, idealWidth: 380)
+            .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth)
 
             // CONVERSATION + COMPOSER
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+                            DSSectionHeader("Output")
+
                             if model.turns.isEmpty {
                                 Text(model.hasStarted
                                      ? "Starting the scene…"
                                      : "Fill in the scene and press Start. The character speaks first.")
-                                    .font(.callout)
+                                    .font(.dsBody)
                                     .foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -209,13 +212,13 @@ struct RoleplayView: View {
 
                             if let err = model.errorText {
                                 Text(err)
-                                    .font(.callout)
-                                    .foregroundStyle(.red)
+                                    .font(.dsBody)
+                                    .foregroundStyle(.dsDanger)
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .padding(16)
+                        .padding(DS.Layout.paneInset)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .onChange(of: model.turns.count) { _, _ in
@@ -227,9 +230,9 @@ struct RoleplayView: View {
 
                 Divider()
 
-                HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .bottom, spacing: DS.Space.sm) {
                     TextField("Your reply…", text: $model.replyText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
+                        .dsTextField()
                         .lineLimit(1...4)
                         .disabled(!model.hasStarted || model.isRunning)
                     Button {
@@ -245,9 +248,9 @@ struct RoleplayView: View {
                     .disabled(!model.hasStarted || model.isRunning
                               || model.replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .padding(12)
+                .padding(DS.Layout.fieldGap)
             }
-            .frame(minWidth: 360)
+            .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
     }
@@ -256,37 +259,35 @@ struct RoleplayView: View {
     /// tappable suggestions, timing, and the raw JSON (collapsed) for schema verification.
     @ViewBuilder
     private func turnView(_ turn: Turn) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             if let user = turn.userText {
                 Text(user)
-                    .font(.callout)
+                    .font(.dsBody)
                     .textSelection(.enabled)
-                    .padding(10)
-                    .glassCard(highlighted: true)
+                    .dsCard(raised: true)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             if let result = turn.result {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
                     Text(result.reply.text)
-                        .font(.body)
+                        .font(.dsBody)
                         .textSelection(.enabled)
                     Text(result.reply.translation)
-                        .font(.callout)
+                        .font(.dsBody)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .glassCard()
+                .dsCard()
 
                 ForEach(Array(result.suggestions.enumerated()), id: \.offset) { _, s in
                     Button {
                         Task { await model.send(suggestion: s.text) }
                     } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(s.text).font(.callout).fontWeight(.medium)
-                            Text(s.translation).font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                            Text(s.text).font(.dsBody).fontWeight(.medium)
+                            Text(s.translation).font(.dsCaption).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -296,39 +297,29 @@ struct RoleplayView: View {
             } else {
                 // Custom-schema turn: no typed reply/suggestions — show the raw JSON.
                 Text(turn.raw)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.dsCode)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .codeSurface()
+                    .dsFlat()
             }
 
             HStack {
                 Spacer()
                 Text(String(format: "%.2f s", turn.elapsed))
-                    .font(.caption.monospacedDigit())
+                    .font(.dsMicro.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             if turn.result != nil {
                 DisclosureGroup("Raw JSON") {
                     Text(turn.raw)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.dsCode)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .codeSurface()
+                        .dsFlat()
                 }
-                .font(.caption)
+                .font(.dsCaption)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func field<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
-            content()
         }
     }
 }

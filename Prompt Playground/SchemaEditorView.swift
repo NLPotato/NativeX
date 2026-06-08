@@ -116,7 +116,7 @@ struct FieldRow: View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: DS.Space.sm) {
                 HStack(spacing: DS.Space.sm) {
-                    TextField("name", text: $field.name).dsTextField().frame(maxWidth: 200)
+                    TextField("name", text: $field.name).dsTextField()
                     Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.dsCaption)
                 }
                 TextField("description", text: $field.description).dsTextField()
@@ -126,7 +126,7 @@ struct FieldRow: View {
         } label: {
             HStack(spacing: DS.Space.sm) {
                 Text(field.name.isEmpty ? "unnamed" : field.name)
-                    .fontWeight(.medium)
+                    .font(.dsLabel)
                     .foregroundStyle(field.name.isEmpty ? Color.secondary : Color.primary)
                 Text(field.type.shortLabel)
                     .font(.dsCaption).foregroundStyle(.secondary)
@@ -228,19 +228,19 @@ struct ArrayEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HStack(spacing: DS.Space.sm) {
-                Text("count min").font(.dsCaption).foregroundStyle(.secondary)
-                TextField("–", text: minText).frame(width: 44).dsTextField()
-                Text("max").font(.dsCaption).foregroundStyle(.secondary)
-                TextField("–", text: maxText).frame(width: 44).dsTextField()
-                Text("of:").font(.dsCaption).foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: DS.Space.sm) {
+                DSField(label: "Count min") {
+                    TextField("–", text: minText).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                }
+                DSField(label: "Count max") {
+                    TextField("–", text: maxText).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                }
             }
-            TypeEditor(type: element, depth: depth + 1)
+            DSField(label: "Of") {
+                TypeEditor(type: element, depth: depth + 1)
+            }
         }
-        .padding(.leading, DS.Space.lg)
-        .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
-                    in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
+        .dsFlat()
     }
 }
 
@@ -265,10 +265,7 @@ struct ObjectEditor: View {
             TextField("Description", text: desc).dsTextField()
             FieldsEditor(fields: fields, depth: depth + 1)
         }
-        .padding(.leading, DS.Space.lg)
-        .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
-                    in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
+        .dsFlat()
     }
 }
 
