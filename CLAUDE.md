@@ -10,7 +10,7 @@ Never add `#Playground { }` auto-run blocks — Xcode auto-runs them and crashes
 **Never invoke the `expo-libs` skill (or any Expo/JS-oriented skill) here.** This is a pure native Swift macOS app — no Expo, no JS bridge. That skill is irrelevant. For Foundation Models, `GlossPlayground.swift` is the canonical in-repo usage example; `docs/reference/foundation-models.md` is the API-truths + gotchas reference.
 
 ## Structure (orientation for coding agents)
-`ContentView.swift` is a 3-tab `TabView` (seeds the store on first launch). Each tab is one **flow** with its own input view + `@Observable` engine, all sharing one SwiftData store (`Storage.swift`) and one core layer (`PlaygroundCore.swift`).
+`ContentView.swift` is a 4-tab `TabView` (seeds the store on first launch): three engine-backed **flows** (Gloss, Role-play, Lab) — each an input view + `@Observable` engine — plus a **Datasets** CRUD manager. All share one SwiftData store (`Storage.swift`) and one core layer (`PlaygroundCore.swift`).
 
 Every output schema runs in one of **two lanes**:
 - **Typed** (default) — compile-time `@Generable` structs. The canonical lane that ships to wiekant; keeps typed metrics + tappable UI. Add one: a `@Generable` struct (file scope, app target) + a `PromptPreset` entry; nothing else changes.
@@ -23,6 +23,9 @@ Every output schema runs in one of **two lanes**:
 ### Flow 2 — Role-play (multi-turn)
 - `RoleplayPlayground.swift` — nested `@Generable` (`RoleplayLineGen`/`RoleplayTurnGen`) + `RoleplayModel` engine (ONE persistent `LanguageModelSession` across turns, `[Turn]` log, `start()`/`send()`, 5-field `{{learning}}/{{native}}/{{situation}}/{{you}}/{{ai}}` substitution).
 - `RoleplayView.swift` — 5-field scene setup + live transcript (reply + 2 tappable suggestions + translations per turn) + composer.
+
+### Datasets (curation) — tab between Role-play and Lab
+- `DatasetsView.swift` — master–detail manager: list datasets (both tasks), view/add/edit/delete `ExampleModel`s, and create/rename/duplicate/delete `DatasetModel`s over the shared store. `ExampleEditorSheet` switches form on task (`GlossInput`/`RoleplayInput`); writes mirror `SaveToPipeline`. Reference-free — examples carry inputs only (expected outputs = roadmap).
 
 ### Flow 3 — Lab (batch eval) — ⚠ tab label only; code is still `Pipeline*`
 LangSmith-style layer that fans a prompt variant over a dataset and scores it.
