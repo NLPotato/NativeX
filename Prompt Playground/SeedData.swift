@@ -43,7 +43,7 @@ enum SeedData {
             instructions: genericGlossTemplate,
             notes: "Generic lane: a Tokenize pre-hook feeds {{words}} into the prompt.",
             hooks: HookPipelineDef(pre: [
-                HookDef(op: .tokenizeWords, inputVar: "input", outputVar: "words",
+                HookDef(op: .tokenizeWords, inputVar: "prompt", outputVar: "words",
                         params: ["language": "{{learning}}", "format": "numbered"])
             ])))
         context.insert(glossDataset())

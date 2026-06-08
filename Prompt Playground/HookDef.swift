@@ -147,6 +147,16 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Short editor suffix when an op only runs in one phase (`""` when it runs in both) — so the
+    /// add-hook menu explains why, e.g., JSON extract is absent from the pre list.
+    var phaseTag: String {
+        switch phase {
+        case .pre:  return " · pre only"
+        case .post: return " · post only"
+        case .both: return ""
+        }
+    }
+
     /// Ops offered for a given phase list in the editor (`.both` shows in both).
     static func choices(for phase: HookPhase) -> [HookOp] {
         allCases.filter { $0.phase == phase || $0.phase == .both }

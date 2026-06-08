@@ -407,8 +407,8 @@ struct ExampleEditorSheet: View {
     }
 
     @ViewBuilder private var genericFields: some View {
-        Section("Input") {
-            TextField("User message sent to the model", text: $genInput, axis: .vertical).lineLimit(1...5)
+        Section("Prompt") {
+            TextField("Prompt sent to the model", text: $genInput, axis: .vertical).lineLimit(1...5)
         }
         Section("Variables") {
             if genVars.isEmpty {

@@ -170,7 +170,8 @@ enum GenericRunner {
     static func run(template: String, input: GenericInput, config: GenConfig,
                     hooks: HookPipelineDef) async -> RunResultData {
         var ctx = input.variables
-        ctx["input"] = input.input
+        ctx["prompt"] = input.input
+        ctx["input"] = input.input   // legacy alias for {{input}}
         _ = await HookEngine.runPre(hooks.pre, context: &ctx)
         let resolvedInstructions = resolveGeneric(template, ctx)
         let userPrompt = resolveGeneric(input.input, ctx)

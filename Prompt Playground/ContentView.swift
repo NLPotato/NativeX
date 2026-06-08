@@ -7,7 +7,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             GlossView()
-                .tabItem { Label("Gloss", systemImage: "text.book.closed") }
+                .tabItem { Label("Single-shot", systemImage: "bolt") }
             RoleplayView()
                 .tabItem { Label("Role-play", systemImage: "bubble.left.and.bubble.right") }
             DatasetsView()
@@ -79,8 +79,10 @@ struct GlossView: View {
                         model.loadPresetDefaults(for: newID)
                     }
 
-                    field("Input") {
-                        TextField("User message sent to the model (also the {{input}} variable)",
+                    sectionHeader("Prompt")
+
+                    field("Prompt") {
+                        TextField("Prompt sent to the model (also the {{prompt}} variable)",
                                   text: $model.input, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
                             .lineLimit(1...4)
@@ -91,7 +93,7 @@ struct GlossView: View {
                         Text("Variables").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
                         VStack(spacing: 6) {
                             if model.variableKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
-                                Text("No variables. Add a {{name}} token in Instructions or Input.")
+                                Text("No variables. Add a {{name}} token in Instructions or Prompt.")
                                     .font(.caption).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -103,6 +105,12 @@ struct GlossView: View {
                             if !model.hookOutputs.isEmpty {
                                 Label("Provided by hooks: \(model.hookOutputs.sorted().map { "{{\($0)}}" }.joined(separator: ", "))",
                                       systemImage: "wand.and.stars")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if model.usesPromptToken {
+                                Label("Provided by the Prompt field: {{prompt}}", systemImage: "text.cursor")
                                     .font(.caption).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -133,15 +141,20 @@ struct GlossView: View {
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     }
 
+                    sectionHeader("Pipeline · optional")
+
                     DisclosureGroup("Generation config") {
                         GenConfigControls(config: $model.config).padding(.top, 4)
                     }
                     .font(.callout)
                     .fontWeight(.semibold)
 
-                    DisclosureGroup("Output schema") {
+                    DisclosureGroup("Guided Generation") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Use a custom schema (run dynamically)", isOn: $model.useCustomSchema)
+                            Text("Guided Generation constrains the model to a fixed output schema (structured output) via constrained decoding.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Toggle("Use a custom output schema", isOn: $model.useCustomSchema)
                             if model.useCustomSchema {
                                 if !savedSchemas.isEmpty {
                                     Menu {
@@ -166,10 +179,10 @@ struct GlossView: View {
 
                     DisclosureGroup("Hooks") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Deterministic native-API steps run before/after the model. A pre-hook’s output becomes a {{variable}} you can use in the prompt.")
+                            Text("Deterministic native ops or shell scripts run before/after the model. A pre-hook’s output becomes a {{variable}} you can use in the prompt.")
                                 .font(.caption2).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            HooksEditorView(hooks: $model.hooks)
+                            HooksEditorView(hooks: $model.hooks, unusedOutputs: Set(model.unusedHookOutputs))
                         }
                         .padding(.top, 4)
                     }
@@ -207,7 +220,7 @@ struct GlossView: View {
                             defaultExampleLabel: exampleLabel,
                             exampleInputJSON: exampleJSON,
                             canSaveExample: canSaveExample,
-                            exampleHint: "Captures the input + variables as a generic test case.",
+                            exampleHint: "Captures the prompt + variables as a generic test case.",
                             onSaved: { savedMessage = $0 },
                             schemaDef: model.useCustomSchema ? model.customSchema : nil,
                             liveConfig: model.config,
@@ -236,9 +249,13 @@ struct GlossView: View {
                         }
                     }
                     if model.stages.isEmpty {
-                        Text("Run a prompt to trace the pipeline: variables → pre-hooks → final prompt → model output → post-hooks → final output.")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("A single-shot Foundation Models runner: author a prompt with optional hooks and Guided Generation, run it, and trace the whole pipeline here. The selected example demonstrates both — pick “Blank (start here)” for your own.")
+                            Text("Run a prompt to trace the pipeline: variables → pre-hooks → final prompt → model output → post-hooks → final output.")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ForEach(model.stages) { StageCard(stage: $0) }
                 }
@@ -256,6 +273,14 @@ struct GlossView: View {
             Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
             content()
         }
+    }
+
+    /// A left-panel group divider so the required prompt block reads apart from optional pipeline steps.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2).fontWeight(.semibold).kerning(0.5)
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
     }
 
     private func variableRow(key: String, value: Binding<String>) -> some View {
@@ -276,10 +301,11 @@ struct GlossView: View {
 /// Two add/remove lists (pre + post) over a HookPipelineDef, mirroring SchemaEditorView's pattern.
 struct HooksEditorView: View {
     @Binding var hooks: HookPipelineDef
+    var unusedOutputs: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            hookList(title: "Pre-hooks · before the model", phase: .pre, list: $hooks.pre, defaultInput: "input")
+            hookList(title: "Pre-hooks · before the model", phase: .pre, list: $hooks.pre, defaultInput: "prompt")
             hookList(title: "Post-hooks · after the model", phase: .post, list: $hooks.post, defaultInput: "output")
         }
     }
@@ -289,11 +315,11 @@ struct HooksEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
             ForEach(list) { $hook in
-                HookRow(hook: $hook, phase: phase) { list.wrappedValue.removeAll { $0.id == hook.id } }
+                HookRow(hook: $hook, phase: phase, unusedOutputs: unusedOutputs) { list.wrappedValue.removeAll { $0.id == hook.id } }
             }
             Menu {
                 ForEach(HookOp.choices(for: phase), id: \.self) { op in
-                    Button(op.displayName) { list.wrappedValue.append(HookDef(op: op, inputVar: defaultInput)) }
+                    Button(op.displayName + op.phaseTag) { list.wrappedValue.append(HookDef(op: op, inputVar: defaultInput)) }
                 }
             } label: { Label("Add \(phase == .pre ? "pre" : "post")-hook", systemImage: "plus.circle") }
                 .font(.caption).menuStyle(.borderlessButton).fixedSize()
@@ -304,6 +330,7 @@ struct HooksEditorView: View {
 private struct HookRow: View {
     @Binding var hook: HookDef
     let phase: HookPhase
+    var unusedOutputs: Set<String> = []
     let onDelete: () -> Void
 
     private var op: Binding<HookOp> {
@@ -314,6 +341,17 @@ private struct HookRow: View {
     }
     private func param(_ p: HookParam) -> Binding<String> {
         Binding(get: { hook.params[p.rawValue] ?? "" }, set: { hook.params[p.rawValue] = $0 })
+    }
+
+    /// A pre-hook's output var is consumed by no {{token}} — the in-row signal of the typo that the
+    /// Variables-card "unused" warning also reports. Post-hook outputs are terminal, so no signal.
+    private var outVarUnused: Bool {
+        phase == .pre && !hook.outputVar.isEmpty && unusedOutputs.contains(hook.outputVar)
+    }
+    /// Accent when the out var is consumed, gold when nothing reads it; nil for post / empty.
+    private var outVarColor: Color? {
+        guard phase == .pre, !hook.outputVar.isEmpty else { return nil }
+        return outVarUnused ? Theme.gold : Theme.accent
     }
 
     var body: some View {
@@ -336,7 +374,17 @@ private struct HookRow: View {
                 TextField("var", text: $hook.inputVar).textFieldStyle(.roundedBorder).frame(width: 84)
                 Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
                 Text("out").font(.caption2).foregroundStyle(.tertiary)
-                TextField("var", text: $hook.outputVar).textFieldStyle(.roundedBorder).frame(width: 84)
+                TextField("var", text: $hook.outputVar)
+                    .textFieldStyle(.roundedBorder).frame(width: 84)
+                    .overlay {
+                        if let c = outVarColor {
+                            RoundedRectangle(cornerRadius: 5).stroke(c, lineWidth: 1)
+                        }
+                    }
+                if outVarUnused {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(Theme.gold)
+                }
             }
             .font(.system(.caption, design: .monospaced))
 

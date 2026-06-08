@@ -60,7 +60,7 @@ struct PromptPreset: Identifiable {
 let presets: [PromptPreset] = [
     PromptPreset(
         id: "gloss",
-        name: "Gloss (example)",
+        name: "Example: gloss (hooks + Guided Generation)",
         defaultInstructions: """
         You are a {{learning}} tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
         Below is the {{learning}} sentence and a numbered list of its words. For EACH listed word, in the same \
@@ -72,7 +72,7 @@ let presets: [PromptPreset] = [
         """,
         defaultInput: "Der Hund schläft.",
         hooks: HookPipelineDef(pre: [
-            HookDef(op: .tokenizeWords, inputVar: "input", outputVar: "words",
+            HookDef(op: .tokenizeWords, inputVar: "prompt", outputVar: "words",
                     params: ["language": "{{learning}}", "format": "numbered"])
         ]),
         useSchema: true,
@@ -80,7 +80,7 @@ let presets: [PromptPreset] = [
     ),
     PromptPreset(
         id: "blank",
-        name: "Blank",
+        name: "Blank (start here)",
         defaultInstructions: "You are a helpful assistant.",
         defaultInput: ""
     ),
@@ -269,13 +269,23 @@ final class PlaygroundModel {
     /// User-editable variables: every `{{name}}` in instructions or input that ISN'T produced by a
     /// hook (hook outputs are computed and shown in the pipeline, not entered here). First-appearance
     /// order, deduped; inner whitespace trimmed so `{{native}}` and `{{ native }}` are one variable.
+    /// Keys the Prompt field provides (canonical + legacy alias) — never shown as editable variables.
+    static let reservedVars: Set<String> = ["prompt", "input"]
+
     var variableKeys: [String] {
         let produced = hooks.producedVars
         var seen = Set<String>(), keys: [String] = []
-        for key in Vars.keys(in: instructions) + Vars.keys(in: input) where !produced.contains(key) {
+        for key in Vars.keys(in: instructions) + Vars.keys(in: input)
+        where !produced.contains(key) && !Self.reservedVars.contains(key) {
             if seen.insert(key).inserted { keys.append(key) }
         }
         return keys
+    }
+
+    /// True when the prompt references the Prompt-field token (`{{prompt}}` or legacy `{{input}}`) —
+    /// drives a "provided by the Prompt field" hint so it isn't mistaken for an unfilled variable.
+    var usesPromptToken: Bool {
+        !Set(Vars.keys(in: instructions) + Vars.keys(in: input)).isDisjoint(with: Self.reservedVars)
     }
 
     /// Variables produced by enabled hooks — shown as info in the Variables card, not editable.
@@ -360,11 +370,13 @@ final class PlaygroundModel {
         defer { isRunning = false }
         let overallStart = Date()
 
-        // 1) Variables — seed the run context (user values + the raw input under `input`).
+        // 1) Variables — seed the run context. The Prompt field is exposed as {{prompt}} (canonical)
+        //    and {{input}} (legacy alias) so older templates keep resolving.
         var ctx = variableValues
+        ctx["prompt"] = input
         ctx["input"] = input
         stages.append(PipelineStage(kind: .variables, title: "Variables", status: .ok,
-                                    body: contextPreview(ctx, keys: variableKeys + ["input"])))
+                                    body: contextPreview(ctx, keys: variableKeys + ["prompt"])))
 
         // 2) Pre-hooks — one at a time so the panel shows progress; each chains off the last.
         for hook in hooks.pre where hook.enabled {
@@ -385,8 +397,8 @@ final class PlaygroundModel {
         let userPrompt = Vars.substitute(input, ctx)
         stages.append(PipelineStage(
             kind: .prompt, title: "Final prompt", status: .ok,
-            body: "INSTRUCTIONS\n\(resolvedInstructions)\n\nUSER MESSAGE\n\(userPrompt)",
-            note: useCustomSchema ? "Output schema injected (includeSchemaInPrompt: true)" : "No schema — free-text output"))
+            body: "INSTRUCTIONS\n\(resolvedInstructions)\n\nPROMPT\n\(userPrompt)",
+            note: promptStageNote(instructions: resolvedInstructions, prompt: userPrompt)))
 
         // 4) Model — fresh session per run so a prior run never biases the next (clean A/B testing).
         stages.append(PipelineStage(kind: .model, title: "Model output", status: .running))
@@ -406,7 +418,7 @@ final class PlaygroundModel {
             stages[mi].status = .ok
             stages[mi].ms = millis(since: modelStart)
             stages[mi].body = rawOutput
-            stages[mi].note = useCustomSchema ? "Conforms to the output schema (constrained decoding)" : nil
+            stages[mi].note = useCustomSchema ? "Conforms to the Guided Generation schema (constrained decoding)" : nil
         } catch let e as SchemaWalker.ValidationError {
             failModel(at: mi, "Schema error: \(e.localizedDescription)", since: modelStart, overall: overallStart)
             return
@@ -447,6 +459,18 @@ final class PlaygroundModel {
         guard (step.output ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         if terminal { return "⚠︎ Produced empty output — the final output is now blank." }
         return outputVar.isEmpty ? nil : "⚠︎ Produced empty output — {{\(outputVar)}} resolves to blank."
+    }
+
+    /// Final-prompt stage note: the schema mode plus an estimated token-headroom reading, so an
+    /// over-long prompt is visible *before* it trips the 4096-token window at runtime.
+    private func promptStageNote(instructions: String, prompt: String) -> String {
+        let schema = useCustomSchema
+            ? "Guided Generation schema injected (includeSchemaInPrompt: true)"
+            : "No schema — free-text output"
+        let tokens = TokenEstimator.estimate(instructions + "\n" + prompt)
+        let pct = Int((Double(tokens) / Double(TokenEstimator.contextWindow) * 100).rounded())
+        let warn = tokens > Int(0.9 * Double(TokenEstimator.contextWindow)) ? "⚠︎ " : ""
+        return "\(schema)\n\(warn)~\(tokens) estimated tokens · \(pct)% of the \(TokenEstimator.contextWindow)-token window"
     }
 
     private func failModel(at index: Int, _ message: String, since modelStart: Date, overall: Date) {
