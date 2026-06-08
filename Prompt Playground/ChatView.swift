@@ -2,10 +2,11 @@
 //  ChatView.swift
 //  Prompt Playground
 //
-//  The Chat tab — a LangSmith-style chat playground over Apple Foundation Models. Two columns:
-//  LEFT authors the conversation as editable, role-labeled message blocks (SYSTEM / HUMAN / AI)
-//  plus the pipeline controls; RIGHT shows the detected Inputs (top) and the latest turn's staged
-//  trace as Output (bottom). "Start" generates the next AI turn. Drives `ChatModel`.
+//  The Chat tab — a chat-mode playground over Apple Foundation Models, sharing the Single-shot
+//  tab's layout (HSplitView: left authoring pane + right "Pipeline" trace pane; no top bar).
+//  The conversation is authored as editable, role-labeled message blocks (SYSTEM / HUMAN / AI);
+//  every block is a {{var}} template filled from the Variables card (below the SYSTEM block).
+//  "Start" generates the next AI turn through the same traced pipeline as Single-shot.
 //
 
 import SwiftUI
@@ -62,73 +63,22 @@ struct ChatView: View {
     var body: some View {
         @Bindable var model = model
 
-        VStack(spacing: 0) {
-            topBar
-            Divider()
-            HSplitView {
-                messagesPane(model: model)
-                    .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth)
-                rightPane
-                    .frame(minWidth: DS.Size.panelMinWidth)
-            }
+        HSplitView {
+            authoringPane(model: model)
+                .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth)
+            pipelinePane
+                .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
         .runningRadiance(active: model.isRunning)
     }
 
-    // MARK: Top bar
+    // MARK: - Left — authoring (mirrors GlossView: Prompt → Variables → Pipeline · optional → actions)
 
-    private var topBar: some View {
-        HStack(spacing: DS.Space.md) {
-            Text("Chat").font(.dsTitle)
-            Spacer()
-            Button(role: .destructive) { model.reset() } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .disabled(model.isRunning)
-
-            Button {
-                savedMessage = nil
-                showingSave = true
-            } label: { Label("Save to Lab…", systemImage: "tray.and.arrow.down") }
-            .disabled(model.isRunning)
-            .sheet(isPresented: $showingSave) {
-                SaveToPipelineSheet(
-                    task: saveTask,
-                    promptInstructions: model.systemInstructions,
-                    defaultTemplateName: isRoleplay ? "Role-play (chat)" : "Chat prompt",
-                    defaultExampleLabel: exampleLabel,
-                    exampleInputJSON: exampleJSON,
-                    canSaveExample: canSaveExample,
-                    exampleHint: exampleHint,
-                    onSaved: { savedMessage = $0 },
-                    schemaDef: model.useCustomSchema ? model.customSchema : nil,
-                    liveConfig: model.config,
-                    hooks: model.hooks)
-            }
-
-            Button {
-                Task { await model.start() }
-            } label: {
-                HStack(spacing: DS.Space.sm) {
-                    if model.isRunning { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "play.fill") }
-                    Text(model.isRunning ? "Running…" : "Start")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!model.canStart)
-        }
-        .padding(DS.Space.lg)
-    }
-
-    // MARK: Left — Messages
-
-    private func messagesPane(model: ChatModel) -> some View {
+    private func authoringPane(model: ChatModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: DS.Layout.groupGap) {
+                VStack(alignment: .leading, spacing: DS.Space.xl) {
                     if let msg = model.availabilityMessage {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
                             .font(.dsBody).foregroundStyle(.dsWarning)
@@ -156,25 +106,76 @@ struct ChatView: View {
                         }
                     }
 
-                    DSSectionHeader("Messages")
+                    DSSectionHeader("Prompt")
 
+                    // Leading SYSTEM block(s) — the instructions.
                     ForEach($model.messages) { $message in
-                        MessageBlockView(message: $message, model: model).id(message.id)
+                        if message.role == .system {
+                            MessageBlockView(message: $message, model: model).id(message.id)
+                        }
                     }
 
-                    HStack(spacing: DS.Space.sm) {
-                        Button { model.addMessage() } label: { Label("Message", systemImage: "plus.circle") }
-                            .disabled(model.isRunning)
-                    }
-                    .font(.dsBody)
+                    // Variables (below SYSTEM, mirroring Single-shot's Variables-below-Instructions order).
+                    variablesGroup
 
-                    schemaDisclosure(model: model)
-                    hooksDisclosure(model: model)
+                    // The conversation turns.
+                    ForEach($model.messages) { $message in
+                        if message.role != .system {
+                            MessageBlockView(message: $message, model: model).id(message.id)
+                        }
+                    }
+
+                    Button { model.addMessage() } label: { Label("Message", systemImage: "plus.circle") }
+                        .font(.dsBody).disabled(model.isRunning)
+
+                    DSSectionHeader("Pipeline · optional")
 
                     DisclosureGroup("Generation config") {
                         GenConfigControls(config: $model.config).padding(.top, DS.Space.xs)
                     }
                     .font(.dsHeading)
+
+                    guidedGenerationGroup(model: model)
+                    hooksGroup(model: model)
+
+                    Button { Task { await model.start() } } label: {
+                        HStack(spacing: DS.Space.sm) {
+                            if model.isRunning { ProgressView().controlSize(.small) }
+                            Text(model.isRunning ? "Running…" : "Start")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!model.canStart)
+
+                    Button {
+                        savedMessage = nil
+                        showingSave = true
+                    } label: { Label("Save to Lab…", systemImage: "tray.and.arrow.down").frame(maxWidth: .infinity) }
+                    .controlSize(.large)
+                    .disabled(model.isRunning)
+                    .sheet(isPresented: $showingSave) {
+                        SaveToPipelineSheet(
+                            task: saveTask,
+                            promptInstructions: model.systemInstructions,
+                            defaultTemplateName: isRoleplay ? "Role-play (chat)" : "Chat prompt",
+                            defaultExampleLabel: exampleLabel,
+                            exampleInputJSON: exampleJSON,
+                            canSaveExample: canSaveExample,
+                            exampleHint: exampleHint,
+                            onSaved: { savedMessage = $0 },
+                            schemaDef: model.useCustomSchema ? model.customSchema : nil,
+                            liveConfig: model.config,
+                            hooks: model.hooks)
+                    }
+
+                    Button(role: .destructive) { model.reset() } label: {
+                        Label("Reset conversation", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .disabled(model.isRunning)
 
                     if let msg = savedMessage {
                         Label(msg, systemImage: "checkmark.circle.fill")
@@ -182,7 +183,7 @@ struct ChatView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(DS.Layout.paneInset)
+                .padding(DS.Space.xl)
             }
             .onChange(of: model.messages.count) { _, _ in
                 if let last = model.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
@@ -190,13 +191,63 @@ struct ChatView: View {
         }
     }
 
+    // MARK: Variables card (renamed from "Inputs"; same shape as GlossView's Variables block)
+
+    private var variablesGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            Text("Variables").font(.dsLabel).foregroundStyle(.secondary)
+            VStack(spacing: DS.Space.md) {
+                if model.inputKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
+                    Text("No variables. Add a {{name}} token in any message.")
+                        .font(.dsCaption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(model.inputKeys, id: \.self) { key in
+                    HStack(spacing: DS.Space.sm) {
+                        Text("{{\(key)}}")
+                            .font(.dsCode).foregroundStyle(.dsAccent)
+                            .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
+                            .background(Color.dsAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+                        Image(systemName: "arrow.right").font(.dsMicro).foregroundStyle(.tertiary)
+                        TextField("value", text: Binding(get: { model.inputs[key] ?? "" }, set: { model.inputs[key] = $0 }))
+                            .dsTextField()
+                    }
+                }
+                if !model.hookOutputs.isEmpty {
+                    Label("Provided by hooks: \(model.hookOutputs.sorted().map { "{{\($0)}}" }.joined(separator: ", "))",
+                          systemImage: "wand.and.stars")
+                        .font(.dsCaption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                }
+                if !model.malformedTokens.isEmpty {
+                    Label("Unrecognized: \(model.malformedTokens.joined(separator: ", ")). Use letters, digits, or _ inside {{ }}.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.dsCaption).foregroundStyle(.dsWarning)
+                        .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                }
+                if !model.unusedHookOutputs.isEmpty {
+                    Label("Hook output unused: \(model.unusedHookOutputs.map { "{{\($0)}}" }.joined(separator: ", ")). Nothing reads it — check the hook's “out” name matches a {{token}}.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.dsCaption).foregroundStyle(.dsWarning)
+                        .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .dsCard()
+        }
+    }
+
+    // MARK: Pipeline · optional groups (mirror GlossView)
+
     @ViewBuilder
-    private func schemaDisclosure(model: ChatModel) -> some View {
-        DisclosureGroup("Output schema") {
+    private func guidedGenerationGroup(model: ChatModel) -> some View {
+        DisclosureGroup("Guided Generation") {
             VStack(alignment: .leading, spacing: DS.Space.sm) {
-                Toggle("Use a custom output schema (Guided Generation)", isOn: $model.useCustomSchema)
-                    .disabled(model.isRunning)
+                Text("Guided Generation constrains the model to a fixed output schema (structured output) via constrained decoding.")
+                    .font(.dsCaption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Use a custom output schema", isOn: $model.useCustomSchema).disabled(model.isRunning)
                 if model.useCustomSchema {
+                    schemaSummary
                     HStack(spacing: DS.Space.sm) {
                         Button { showingSchemaSheet = true } label: { Label("Edit schema…", systemImage: "curlybraces.square") }
                         Button("New") { model.customSchema = .blank }
@@ -210,13 +261,13 @@ struct ChatView: View {
                         }
                     }
                     .font(.dsBody).disabled(model.isRunning)
-                    Text("Replies are raw JSON (no tappable suggestions). Save + export Swift from “Save to Lab…”.")
+                    Text("Runs via DynamicGenerationSchema. Save it + export Swift from “Save to Lab…”.")
                         .font(.dsCaption).foregroundStyle(.secondary)
                 } else if model.preset.useTypedRoleplay {
                     Text("Using the typed RoleplayTurnGen (tappable suggestions + translations).")
                         .font(.dsCaption).foregroundStyle(.secondary)
                 } else {
-                    Text("No schema — plain-text replies.")
+                    Text("No schema — the model returns free-form text.")
                         .font(.dsCaption).foregroundStyle(.secondary)
                 }
             }
@@ -228,8 +279,21 @@ struct ChatView: View {
         }
     }
 
+    private var schemaSummary: some View {
+        HStack(spacing: DS.Space.sm) {
+            Image(systemName: "curlybraces").foregroundStyle(.dsAccent)
+            Text(model.customSchema.typeName.isEmpty ? "Output" : model.customSchema.typeName).font(.dsLabel)
+            let n = model.customSchema.fields.count
+            Text("· \(n) field\(n == 1 ? "" : "s")").foregroundStyle(.secondary)
+        }
+        .font(.dsBody)
+        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+    }
+
     @ViewBuilder
-    private func hooksDisclosure(model: ChatModel) -> some View {
+    private func hooksGroup(model: ChatModel) -> some View {
         DisclosureGroup("Hooks") {
             VStack(alignment: .leading, spacing: DS.Space.sm) {
                 Text("Deterministic native ops or shell scripts run before/after each turn. A pre-hook’s output becomes a {{variable}} you can use in any message.")
@@ -260,87 +324,41 @@ struct ChatView: View {
         }
     }
 
-    // MARK: Right — Inputs (top) + Output (bottom)
+    // MARK: - Right — the run as live pipeline stages (identical shape to GlossView's right pane)
 
-    private var rightPane: some View {
-        VSplitView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.md) {
-                    DSSectionHeader("Inputs")
-                    inputsCard
-                }
-                .padding(DS.Layout.paneInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Space.lg) {
-                    HStack {
-                        DSSectionHeader("Output")
-                        Spacer()
-                        if let e = latestAI?.elapsed {
-                            Text(String(format: "%.2f s", e)).font(.dsCaption.monospacedDigit()).foregroundStyle(.secondary)
-                        }
-                    }
-                    if let ai = latestAI, !ai.trace.isEmpty {
-                        ForEach(ai.trace) { StageCard(stage: $0) }
-                        if let err = ai.errorText {
-                            Text(err).font(.dsBody).foregroundStyle(.dsDanger).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        Text("⌘↩ or click Start to generate the next assistant turn. The pipeline trace (variables → hooks → final prompt → model → post-hooks) shows here.")
-                            .font(.dsBody).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+    private var pipelinePane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Space.lg) {
+                HStack {
+                    Text("Pipeline").font(.dsTitle)
+                    Spacer()
+                    if let e = latestAI?.elapsed {
+                        Text(String(format: "%.2f s", e)).font(.dsCaption.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
-                .padding(DS.Layout.paneInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                if let ai = latestAI, !ai.trace.isEmpty {
+                    ForEach(ai.trace) { StageCard(stage: $0) }
+                    if let err = ai.errorText {
+                        Text(err).font(.dsBody).foregroundStyle(.dsDanger).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: DS.Space.sm) {
+                        Text("A chat-mode Foundation Models runner: author the conversation as message blocks, fill the Variables, and Start to generate the next assistant turn.")
+                        Text("Each turn traces the pipeline: variables → pre-hooks → final prompt → model output → post-hooks → final output.")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.dsBody).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .padding(DS.Space.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minWidth: DS.Size.panelMinWidth)
     }
 
     private var latestAI: ChatMessage? { model.messages.last { $0.role == .ai } }
-
-    private var inputsCard: some View {
-        VStack(spacing: DS.Space.md) {
-            if model.inputKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
-                Text("No variables. Add a {{name}} token in any message.")
-                    .font(.dsCaption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            ForEach(model.inputKeys, id: \.self) { key in
-                HStack(spacing: DS.Space.sm) {
-                    Text("{{\(key)}}")
-                        .font(.dsCode).foregroundStyle(.dsAccent)
-                        .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
-                        .background(Color.dsAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
-                    Image(systemName: "arrow.right").font(.dsMicro).foregroundStyle(.tertiary)
-                    TextField("value", text: Binding(get: { model.inputs[key] ?? "" }, set: { model.inputs[key] = $0 }))
-                        .dsTextField()
-                }
-            }
-            if !model.hookOutputs.isEmpty {
-                Label("Provided by hooks: \(model.hookOutputs.sorted().map { "{{\($0)}}" }.joined(separator: ", "))",
-                      systemImage: "wand.and.stars")
-                    .font(.dsCaption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            }
-            if !model.malformedTokens.isEmpty {
-                Label("Unrecognized: \(model.malformedTokens.joined(separator: ", ")). Use letters, digits, or _ inside {{ }}.",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.dsCaption).foregroundStyle(.dsWarning)
-                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            }
-            if !model.unusedHookOutputs.isEmpty {
-                Label("Hook output unused: \(model.unusedHookOutputs.map { "{{\($0)}}" }.joined(separator: ", ")). Nothing reads it — check the hook's “out” name matches a {{token}}.",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.dsCaption).foregroundStyle(.dsWarning)
-                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .dsCard()
-    }
 }
 
 // MARK: - One editable, role-labeled message block
