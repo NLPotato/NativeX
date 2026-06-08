@@ -126,3 +126,52 @@ struct DSSectionHeader: View {
             .padding(.top, DS.Space.sm)
     }
 }
+
+// MARK: Running radiance — neon-green edge glow shown while a run is in flight.
+
+/// Frames the four edges with a neon-green bloom while a generation is running. A bright lime
+/// hot-spot sweeps the perimeter (life), the whole frame breathes (intensity). See `runningRadiance`.
+private struct RunningRadiance: View {
+    var corner: CGFloat
+    @State private var sweep = false
+    @State private var breathe = false
+
+    var body: some View {
+        // Bright lime concentrated, fading to faint accent — two hot-spots so every edge stays lit
+        // while they travel around the frame.
+        let gradient = AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: Theme.accent.opacity(0.30), location: 0.00),
+                .init(color: Theme.lime,                 location: 0.12),
+                .init(color: Theme.accent.opacity(0.30), location: 0.25),
+                .init(color: Theme.accent.opacity(0.30), location: 0.50),
+                .init(color: Theme.lime,                 location: 0.62),
+                .init(color: Theme.accent.opacity(0.30), location: 0.75),
+                .init(color: Theme.accent.opacity(0.30), location: 1.00),
+            ]),
+            center: .center,
+            angle: .degrees(sweep ? 360 : 0))
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+
+        ZStack {
+            shape.strokeBorder(gradient, lineWidth: 6).blur(radius: 18)   // outer bloom, bleeds inward
+            shape.strokeBorder(gradient, lineWidth: 3).blur(radius: 6)    // mid glow
+            shape.strokeBorder(gradient, lineWidth: 1.5)                  // crisp neon edge
+        }
+        .opacity(breathe ? 1.0 : 0.55)
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { sweep = true }
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { breathe = true }
+        }
+    }
+}
+
+extension View {
+    /// Neon-green radiance framing the view's four edges while `active` (a run in flight). Tasteful
+    /// "it's working" cue; non-interactive and fades in/out with the run.
+    func runningRadiance(active: Bool, corner: CGFloat = DS.Radius.lg) -> some View {
+        overlay { if active { RunningRadiance(corner: corner).transition(.opacity) } }
+            .animation(.easeInOut(duration: 0.45), value: active)
+    }
+}

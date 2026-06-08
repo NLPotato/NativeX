@@ -280,6 +280,7 @@ struct GlossView: View {
             .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
+        .runningRadiance(active: model.isRunning)   // neon-green edge glow while a run is in flight
     }
 
     @ViewBuilder
