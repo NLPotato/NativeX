@@ -70,7 +70,7 @@ enum SchemaBuilder {
 // MARK: - Dynamic run helper
 
 /// Runs a `SchemaDef` dynamically on a session and returns pretty JSON of the result. Shared by
-/// the live engines (`PlaygroundModel`/`RoleplayModel`) and the headless pipeline (`DynamicRunner`).
+/// the live engines (`PlaygroundModel`/`ChatModel`) and the headless pipeline (`DynamicRunner`).
 @MainActor
 enum DynamicRun {
     static func respond(session: LanguageModelSession, prompt: String, def: SchemaDef,

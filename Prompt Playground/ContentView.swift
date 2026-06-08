@@ -8,8 +8,8 @@ struct ContentView: View {
         TabView {
             GlossView()
                 .tabItem { Label("Single-shot", systemImage: "bolt") }
-            RoleplayView()
-                .tabItem { Label("Role-play", systemImage: "bubble.left.and.bubble.right") }
+            ChatView()
+                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             DatasetsView()
                 .tabItem { Label("Datasets", systemImage: "tablecells") }
             PipelineView()   // "Lab" tab; type/file kept as Pipeline* (see CLAUDE.md naming note)
@@ -492,7 +492,7 @@ private struct HookRow: View {
 
 // MARK: - Pipeline stage card (right panel)
 
-private struct StageCard: View {
+struct StageCard: View {
     let stage: PlaygroundModel.PipelineStage
 
     var body: some View {

@@ -38,7 +38,7 @@ enum SeedData {
         context.insert(PromptTemplateModel(task: .gloss, name: "Gloss baseline", version: 1,
             instructions: glossTemplate, notes: "Canonical {{learning}}/{{native}} gloss prompt."))
         context.insert(PromptTemplateModel(task: .roleplay, name: "Role-play baseline", version: 1,
-            instructions: RoleplayModel.defaultInstructions, notes: "Mirrors wiekant's role-play scaffold."))
+            instructions: defaultRoleplayInstructions, notes: "Mirrors wiekant's role-play scaffold."))
         context.insert(PromptTemplateModel(task: .generic, name: "Gloss (hooks demo)", version: 1,
             instructions: genericGlossTemplate,
             notes: "Generic lane: a Tokenize pre-hook feeds {{words}} into the prompt.",
