@@ -90,7 +90,7 @@ extension SchemaDef {
         let word = ObjectDef(name: "CJKGlossWord", description: "One word from the sentence, with its reading and analysis", fields: [
             Field(name: "surface", description: "Word exactly as it appears, in the original script", type: .string),
             Field(name: "reading", description: "Pronunciation in Latin letters (romaja / pinyin / romaji), copied from the reading given for this word", type: .string),
-            Field(name: "dictionaryForm", description: "Dictionary / base form — the unconjugated verb or adjective, or the word with any attached particle removed", type: .string),
+            Field(name: "dictionaryForm", description: "Dictionary / base form in the word's OWN script (Hangul / Kanji / Hanzi), never the romanized reading — the unconjugated verb or adjective, or the surface with any attached particle removed", type: .string),
             Field(name: "partOfSpeech", description: "Part of speech",
                   type: .enumeration(cases: ["noun", "verb", "adjective", "adverb", "pronoun", "determiner",
                                              "particle", "numeral", "classifier", "conjunction", "interjection", "other"])),

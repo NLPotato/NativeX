@@ -91,8 +91,14 @@ let presets: [PromptPreset] = [
         [brackets]. For EACH listed word, in the same order, give: its dictionary (base) form, its part of \
         speech, and its single best meaning IN THIS SENTENCE as one short {{native}} gloss. Copy each surface \
         and reading exactly as given — do not re-romanize. {{learning}} words are often conjugated or carry \
-        particles; always give the plain dictionary form. Then give a natural {{native}} translation of the \
-        whole sentence and one or two short grammar notes.
+        particles; always give the dictionary form in {{learning}}'s OWN script (the same script as the \
+        surface), NEVER the romanized reading.
+
+        Example dictionary forms (different words, for guidance — do not include them in your answer):
+          책을 [chaegeul] → 책   ·   읽었어요 [ilgeosseoyo] → 읽다   ·   학교에서 [hakgyoeseo] → 학교
+        Each form is Hangul (책 · 읽다 · 학교), not the reading — particles dropped, verbs/adjectives in their \
+        plain 다 form. Then give a natural {{native}} translation of the whole sentence and one or two short \
+        grammar notes.
 
         Words:
         {{words}}
@@ -295,62 +301,23 @@ final class PlaygroundModel {
     /// `{{name}}` matcher — the one shared `Vars` pattern, so detection and substitution can't drift.
     static let variablePattern = Vars.pattern
 
-    /// User-editable variables: every `{{name}}` in instructions or input that ISN'T produced by a
-    /// hook (hook outputs are computed and shown in the pipeline, not entered here). First-appearance
-    /// order, deduped; inner whitespace trimmed so `{{native}}` and `{{ native }}` are one variable.
-    /// Keys the Prompt field provides (canonical + legacy alias) — never shown as editable variables.
-    static let reservedVars: Set<String> = ["prompt", "input"]
-
+    // The mis-wiring guards live in `PromptAnalysis` (PlaygroundCore) so the Lab inspector and the
+    // Datasets editor reuse the exact same logic; these just bind them to the live engine's fields.
     var variableKeys: [String] {
-        let produced = hooks.producedVars
-        var seen = Set<String>(), keys: [String] = []
-        for key in Vars.keys(in: instructions) + Vars.keys(in: input)
-        where !produced.contains(key) && !Self.reservedVars.contains(key) {
-            if seen.insert(key).inserted { keys.append(key) }
-        }
-        return keys
+        PromptAnalysis.variableKeys(instructions: instructions, input: input, hooks: hooks)
     }
-
     /// True when the prompt references the Prompt-field token (`{{prompt}}` or legacy `{{input}}`) —
     /// drives a "provided by the Prompt field" hint so it isn't mistaken for an unfilled variable.
     var usesPromptToken: Bool {
-        !Set(Vars.keys(in: instructions) + Vars.keys(in: input)).isDisjoint(with: Self.reservedVars)
+        PromptAnalysis.usesPromptToken(instructions: instructions, input: input)
     }
-
     /// Variables produced by enabled hooks — shown as info in the Variables card, not editable.
-    var hookOutputs: Set<String> { hooks.producedVars }
-
-    /// `{{…}}` fragments whose contents aren't a clean variable name (letters/digits/underscore).
-    /// Surfaced as a warning so malformed tokens like `{{na me}}` or `{{}}` aren't dropped silently.
-    var malformedTokens: [String] {
-        var bad: [String] = []
-        for match in instructions.matches(of: /\{\{(.*?)\}\}/) {
-            let inner = String(match.1)
-            if inner.trimmingCharacters(in: .whitespaces).wholeMatch(of: /[A-Za-z0-9_]+/) == nil {
-                bad.append("{{\(inner)}}")
-            }
-        }
-        return bad
-    }
-
-    /// Enabled pre-hooks whose `outputVar` is consumed nowhere — not by an instructions/input
-    /// `{{token}}`, not by a later hook's input var, and not by any hook's params. That output is
-    /// dead weight and, far more often, a typo of the `{{token}}` the prompt actually expects — so
-    /// it's flagged before a run wastes a model call producing a silently-empty variable. Post-hook
-    /// outputs are terminal (they feed the final output, not a `{{token}}`), so they're excluded.
+    var hookOutputs: Set<String> { PromptAnalysis.hookOutputs(hooks) }
+    /// `{{…}}` fragments in the instructions whose contents aren't a clean variable name.
+    var malformedTokens: [String] { PromptAnalysis.malformedTokens(in: instructions) }
+    /// Enabled pre-hooks whose `outputVar` is consumed nowhere (the `outputVar`-typo catcher).
     var unusedHookOutputs: [String] {
-        let produced = hooks.pre.filter { $0.enabled && !$0.outputVar.isEmpty }
-        guard !produced.isEmpty else { return [] }
-        var consumed = Set(Vars.keys(in: instructions) + Vars.keys(in: input))
-        for hook in hooks.pre + hooks.post where hook.enabled {
-            consumed.insert(hook.inputVar)
-            for value in hook.params.values { consumed.formUnion(Vars.keys(in: value)) }
-        }
-        var seen = Set<String>(), unused: [String] = []
-        for hook in produced where !consumed.contains(hook.outputVar) {
-            if seen.insert(hook.outputVar).inserted { unused.append(hook.outputVar) }
-        }
-        return unused
+        PromptAnalysis.unusedHookOutputs(instructions: instructions, input: input, hooks: hooks)
     }
 
     /// Load the chosen preset's instructions, sample input, hook pipeline, and output schema.
@@ -438,17 +405,32 @@ final class PlaygroundModel {
         var rawOutput = ""
         do {
             let session = LanguageModelSession(instructions: resolvedInstructions)
+            var ttft: Int? = nil
+            // Stream the response so the panel fills in live; the last snapshot is the complete output.
             if useCustomSchema {
-                let content = try await DynamicRun.respond(session: session, prompt: userPrompt,
-                                                           def: customSchema, options: config.toOptions())
-                rawOutput = prettyJSONString(content.jsonString)
+                let schema = try SchemaBuilder.generationSchema(from: customSchema)
+                for try await snapshot in session.streamResponse(to: userPrompt, schema: schema,
+                                                                 includeSchemaInPrompt: true,
+                                                                 options: config.toOptions()) {
+                    if ttft == nil { ttft = millis(since: modelStart) }
+                    rawOutput = prettyJSONString(snapshot.rawContent.jsonString)
+                    stages[mi].body = rawOutput
+                }
             } else {
-                rawOutput = try await session.respond(to: userPrompt, options: config.toOptions()).content
+                for try await snapshot in session.streamResponse(to: userPrompt, options: config.toOptions()) {
+                    if ttft == nil { ttft = millis(since: modelStart) }
+                    rawOutput = snapshot.content
+                    stages[mi].body = rawOutput
+                }
             }
+            let modelMs = millis(since: modelStart)
             stages[mi].status = .ok
-            stages[mi].ms = millis(since: modelStart)
+            stages[mi].ms = modelMs
             stages[mi].body = rawOutput
-            stages[mi].note = useCustomSchema ? "Conforms to the Guided Generation schema (constrained decoding)" : nil
+            var note = [useCustomSchema ? "Conforms to the Guided Generation schema (constrained decoding)" : "Free-text output (streamed)"]
+            if let ttft { note.append("TTFT \(ttft) ms") }
+            if let tps = tokensPerSec(rawOutput, ms: modelMs) { note.append(String(format: "~%.0f tok/s", tps)) }
+            stages[mi].note = note.joined(separator: " · ")
         } catch let e as SchemaWalker.ValidationError {
             failModel(at: mi, "Schema error: \(e.localizedDescription)", since: modelStart, overall: overallStart)
             return
@@ -494,13 +476,7 @@ final class PlaygroundModel {
     /// Final-prompt stage note: the schema mode plus an estimated token-headroom reading, so an
     /// over-long prompt is visible *before* it trips the 4096-token window at runtime.
     private func promptStageNote(instructions: String, prompt: String) -> String {
-        let schema = useCustomSchema
-            ? "Guided Generation schema injected (includeSchemaInPrompt: true)"
-            : "No schema — free-text output"
-        let tokens = TokenEstimator.estimate(instructions + "\n" + prompt)
-        let pct = Int((Double(tokens) / Double(TokenEstimator.contextWindow) * 100).rounded())
-        let warn = tokens > Int(0.9 * Double(TokenEstimator.contextWindow)) ? "⚠︎ " : ""
-        return "\(schema)\n\(warn)~\(tokens) estimated tokens · \(pct)% of the \(TokenEstimator.contextWindow)-token window"
+        PromptAnalysis.headroomNote(instructions: instructions, prompt: prompt, schemaInjected: useCustomSchema)
     }
 
     private func failModel(at index: Int, _ message: String, since modelStart: Date, overall: Date) {

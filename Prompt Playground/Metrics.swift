@@ -40,7 +40,7 @@ struct RoleplayMetrics: Codable, Equatable, Sendable {
 /// multi-turn and the role-play bundle aggregates across turns.
 struct RunMetrics: Codable, Equatable, Sendable {
     var decoded: Bool
-    var errorType: String?               // nil | "contextWindow" | "decode" | "guardrail" | "other"
+    var errorType: String?               // nil | "contextWindow" | "guardrail" | "unsupportedLanguage" | "decoding" | "refusal" | …
     var latencyMs: Int
     var promptTokensEst: Int
     var outputTokensEst: Int
@@ -49,6 +49,11 @@ struct RunMetrics: Codable, Equatable, Sendable {
     var onTargetLanguage: Double?        // gloss: translations in native; role-play: lines in learning
     var gloss: GlossMetrics?
     var roleplay: RoleplayMetrics?
+    // Streaming/perf (generic lane streams internally to capture these). All optional → old runs decode.
+    var ttftMs: Int? = nil               // time to first streamed token
+    var tokensPerSec: Double? = nil      // estimated output tokens / generation seconds
+    // Reference-based eval — set by ExperimentRunner when the example carries an expected output.
+    var referenceMatch: Double? = nil    // 0–1: structural/exact = 1.0 else token-Jaccard similarity
 
     static func failure(_ errorType: String, latencyMs: Int) -> RunMetrics {
         RunMetrics(decoded: false, errorType: errorType, latencyMs: latencyMs,
@@ -162,7 +167,8 @@ enum Evaluators {
 
 enum GenericEvaluator {
     static func metrics(json: String, decoded: Bool, latencyMs: Int, resolvedPrompt: String,
-                        expectedLanguage: String, context: Int) -> RunMetrics {
+                        expectedLanguage: String, context: Int,
+                        ttftMs: Int? = nil, tokensPerSec: Double? = nil) -> RunMetrics {
         let strings = decoded ? stringLeaves(json) : []
         let lang = LanguageTools.matchScore(strings, expected: expectedLanguage)
         return RunMetrics(
@@ -170,7 +176,8 @@ enum GenericEvaluator {
             promptTokensEst: TokenEstimator.estimate(resolvedPrompt),
             outputTokensEst: TokenEstimator.estimate(json),
             contextTokensEst: context, contextHeadroom: TokenEstimator.headroom(context),
-            onTargetLanguage: lang, gloss: nil, roleplay: nil)
+            onTargetLanguage: lang, gloss: nil, roleplay: nil,
+            ttftMs: ttftMs, tokensPerSec: tokensPerSec)
     }
 
     /// Every String value nested anywhere in a JSON document.
@@ -188,6 +195,42 @@ enum GenericEvaluator {
         }
         walk(obj)
         return out
+    }
+}
+
+// MARK: - Reference-based evaluator (optional ground truth)
+// When a dataset Example carries an expected output, score the run against it. Deterministic and
+// cheap: a structural-JSON or normalized-text exact match is 1.0; otherwise token-set (Jaccard)
+// overlap so near-misses score partially. (Semantic scoring stays the separate, optional LLM Judge.)
+
+enum ReferenceEvaluator {
+    static func match(output: String, expected: String) -> Double {
+        let e = expected.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !e.isEmpty else { return 0 }
+        if let a = canonicalJSON(output), let b = canonicalJSON(e), a == b { return 1.0 }
+        let on = normalize(output), en = normalize(e)
+        if on == en { return 1.0 }
+        return jaccard(tokens(on), tokens(en))
+    }
+
+    private static func normalize(_ s: String) -> String {
+        s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private static func tokens(_ s: String) -> Set<String> {
+        Set(s.split { !$0.isLetter && !$0.isNumber }.map(String.init)).subtracting([""])
+    }
+    private static func jaccard(_ a: Set<String>, _ b: Set<String>) -> Double {
+        guard !a.isEmpty || !b.isEmpty else { return 1.0 }
+        let union = a.union(b).count
+        return union == 0 ? 0 : Double(a.intersection(b).count) / Double(union)
+    }
+    /// Canonical (sorted-key) compact JSON, or nil when not a JSON object/array.
+    private static func canonicalJSON(_ s: String) -> String? {
+        guard let data = s.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              let out = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
+              let str = String(data: out, encoding: .utf8) else { return nil }
+        return str
     }
 }
 
@@ -240,6 +283,7 @@ struct VariantStats: Codable, Equatable, Sendable {
     var meanSuggestionCountOK: Double?
     var meanDistinct: Double?
     var contextLimitRate: Double?
+    var meanReferenceMatch: Double?      // mean 0–1 vs expected outputs (only runs that had a reference)
     var meanManualRating: Double?        // Phase 2 (1–5)
     var meanJudge: Double?               // Phase 2 (1–5)
 
@@ -251,7 +295,8 @@ struct VariantStats: Codable, Equatable, Sendable {
             return VariantStats(n: 0, decodeRate: 0, meanComposite: 0, meanOnTargetLanguage: nil,
                                 p95LatencyMs: 0, p95ContextTokens: 0, meanCoverage: nil,
                                 meanHallucination: nil, meanSuggestionCountOK: nil, meanDistinct: nil,
-                                contextLimitRate: nil, meanManualRating: nil, meanJudge: nil)
+                                contextLimitRate: nil, meanReferenceMatch: nil,
+                                meanManualRating: nil, meanJudge: nil)
         }
         func mean(_ xs: [Double]) -> Double? { xs.isEmpty ? nil : xs.reduce(0, +) / Double(xs.count) }
         let decoded = runs.filter(\.decoded)
@@ -271,6 +316,7 @@ struct VariantStats: Codable, Equatable, Sendable {
             meanSuggestionCountOK: mean(roleplay.map(\.suggestionCountOK)),
             meanDistinct: mean(roleplay.map(\.distinctSuggestions)),
             contextLimitRate: roleplay.isEmpty ? nil : Double(roleplay.filter(\.hitContextLimit).count) / Double(roleplay.count),
+            meanReferenceMatch: mean(decoded.compactMap(\.referenceMatch)),
             meanManualRating: mean(manualRatings.map(Double.init)),
             meanJudge: mean(judgeScores)
         )
@@ -305,6 +351,9 @@ enum GoldenThresholds {
         ]
         if let lang = s.meanOnTargetLanguage {
             checks.append(check("On-target language ≥ 0.98", lang >= 0.98, String(format: "%.2f", lang)))
+        }
+        if let ref = s.meanReferenceMatch {
+            checks.append(check("Reference match ≥ 0.90", ref >= 0.90, String(format: "%.2f", ref)))
         }
         switch task {
         case .gloss:

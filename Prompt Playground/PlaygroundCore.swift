@@ -51,6 +51,79 @@ enum Vars {
     }
 }
 
+// MARK: - Prompt analysis (the mis-wiring guards, shared)
+// Pure, stateless versions of the authoring-time guards the Single-shot engine surfaces. One home so
+// the live tab engine, the Lab variant inspector, and the Datasets editor can't drift on what counts
+// as a user variable / a malformed token / an unused hook output.
+
+enum PromptAnalysis {
+    /// Keys the Prompt field provides (`{{prompt}}` canonical + legacy `{{input}}`) — never editable.
+    static let reservedVars: Set<String> = ["prompt", "input"]
+
+    /// User-editable variables: every `{{name}}` in instructions or input that ISN'T produced by a
+    /// hook and isn't reserved. First-appearance order, deduped.
+    static func variableKeys(instructions: String, input: String, hooks: HookPipelineDef) -> [String] {
+        let produced = hooks.producedVars
+        var seen = Set<String>(), keys: [String] = []
+        for key in Vars.keys(in: instructions) + Vars.keys(in: input)
+        where !produced.contains(key) && !reservedVars.contains(key) {
+            if seen.insert(key).inserted { keys.append(key) }
+        }
+        return keys
+    }
+
+    /// True when the prompt references the Prompt-field token (`{{prompt}}` or legacy `{{input}}`).
+    static func usesPromptToken(instructions: String, input: String) -> Bool {
+        !Set(Vars.keys(in: instructions) + Vars.keys(in: input)).isDisjoint(with: reservedVars)
+    }
+
+    /// Variables produced by enabled hooks.
+    static func hookOutputs(_ hooks: HookPipelineDef) -> Set<String> { hooks.producedVars }
+
+    /// `{{…}}` fragments whose contents aren't a clean variable name (letters/digits/underscore) —
+    /// so malformed tokens like `{{na me}}` or `{{}}` are flagged rather than silently dropped.
+    static func malformedTokens(in text: String) -> [String] {
+        var bad: [String] = []
+        for match in text.matches(of: /\{\{(.*?)\}\}/) {
+            let inner = String(match.1)
+            if inner.trimmingCharacters(in: .whitespaces).wholeMatch(of: /[A-Za-z0-9_]+/) == nil {
+                bad.append("{{\(inner)}}")
+            }
+        }
+        return bad
+    }
+
+    /// Enabled pre-hooks whose `outputVar` is consumed nowhere — not by an instructions/input
+    /// `{{token}}`, a later hook's input var, or any hook's params. Usually a typo of the `{{token}}`
+    /// the prompt actually expects; flagged before a run wastes a model call on a blank variable.
+    static func unusedHookOutputs(instructions: String, input: String, hooks: HookPipelineDef) -> [String] {
+        let produced = hooks.pre.filter { $0.enabled && !$0.outputVar.isEmpty }
+        guard !produced.isEmpty else { return [] }
+        var consumed = Set(Vars.keys(in: instructions) + Vars.keys(in: input))
+        for hook in hooks.pre + hooks.post where hook.enabled {
+            consumed.insert(hook.inputVar)
+            for value in hook.params.values { consumed.formUnion(Vars.keys(in: value)) }
+        }
+        var seen = Set<String>(), unused: [String] = []
+        for hook in produced where !consumed.contains(hook.outputVar) {
+            if seen.insert(hook.outputVar).inserted { unused.append(hook.outputVar) }
+        }
+        return unused
+    }
+
+    /// Final-prompt stage note: the schema mode plus an estimated token-headroom reading, so an
+    /// over-long prompt is visible *before* it trips the 4096-token window at runtime.
+    static func headroomNote(instructions: String, prompt: String, schemaInjected: Bool) -> String {
+        let schema = schemaInjected
+            ? "Guided Generation schema injected (includeSchemaInPrompt: true)"
+            : "No schema — free-text output"
+        let tokens = TokenEstimator.estimate(instructions + "\n" + prompt)
+        let pct = Int((Double(tokens) / Double(TokenEstimator.contextWindow) * 100).rounded())
+        let warn = tokens > Int(0.9 * Double(TokenEstimator.contextWindow)) ? "⚠︎ " : ""
+        return "\(schema)\n\(warn)~\(tokens) estimated tokens · \(pct)% of the \(TokenEstimator.contextWindow)-token window"
+    }
+}
+
 // MARK: - Proficiency
 // Drives deterministic word-selection in the gloss pipeline: words whose Zipf frequency is at or
 // above `glossCutoff` are assumed already-known and are NOT sent to the model to gloss (beginner
@@ -83,25 +156,47 @@ enum Proficiency: String, Codable, CaseIterable, Sendable {
 
 struct GenConfig: Codable, Equatable, Hashable, Sendable {
     enum Sampling: String, Codable, CaseIterable, Sendable {
-        case `default`, greedy
-        var label: String { self == .greedy ? "greedy" : "default" }
+        case `default`, greedy, topK, nucleus
+        var label: String {
+            switch self {
+            case .default: return "default"
+            case .greedy:  return "greedy"
+            case .topK:    return "top-k"
+            case .nucleus: return "nucleus"
+            }
+        }
     }
     var sampling: Sampling = .default
     var temperature: Double? = nil
     var maximumResponseTokens: Int? = nil
+    // Sampling-mode params (used only by the matching mode). seed makes random sampling reproducible.
+    var topK: Int? = nil
+    var probabilityThreshold: Double? = nil   // nucleus / top-p
+    var seed: UInt64? = nil
 
     func toOptions() -> GenerationOptions {
-        GenerationOptions(
-            sampling: sampling == .greedy ? .greedy : nil,
-            temperature: temperature,
-            maximumResponseTokens: maximumResponseTokens
-        )
+        let mode: GenerationOptions.SamplingMode?
+        switch sampling {
+        case .default: mode = nil
+        case .greedy:  mode = .greedy
+        case .topK:    mode = .random(top: topK ?? 50, seed: seed)
+        case .nucleus: mode = .random(probabilityThreshold: probabilityThreshold ?? 0.9, seed: seed)
+        }
+        return GenerationOptions(sampling: mode, temperature: temperature,
+                                 maximumResponseTokens: maximumResponseTokens)
     }
 
-    /// Short human label for leaderboards, e.g. "greedy · maxTok 512".
+    /// Short human label for leaderboards, e.g. "nucleus p0.9 · seed 42 · temp 0.7 · maxTok 512".
     var label: String {
-        var parts = [sampling.label]
+        var parts: [String]
+        switch sampling {
+        case .default: parts = ["default"]
+        case .greedy:  parts = ["greedy"]
+        case .topK:    parts = ["top-k \(topK ?? 50)"]
+        case .nucleus: parts = [String(format: "nucleus p%.2g", probabilityThreshold ?? 0.9)]
+        }
         if let t = temperature { parts.append("temp \(String(format: "%.2g", t))") }
+        if let s = seed, sampling == .topK || sampling == .nucleus { parts.append("seed \(s)") }
         if let m = maximumResponseTokens { parts.append("maxTok \(m)") }
         return parts.joined(separator: " · ")
     }

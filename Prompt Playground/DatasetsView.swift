@@ -313,6 +313,8 @@ struct ExampleEditorSheet: View {
     // generic
     @State private var genInput = ""
     @State private var genVars: [VarDraft] = []
+    // reference (all tasks) — optional ground truth for reference-based scoring in the Lab
+    @State private var expectedOutput = ""
 
     private struct TurnDraft: Identifiable { let id = UUID(); var text: String }
     private struct VarDraft: Identifiable { let id = UUID(); var key: String; var value: String }
@@ -356,6 +358,7 @@ struct ExampleEditorSheet: View {
                     case .roleplay: roleplayFields
                     case .generic: genericFields
                     }
+                    expectedOutputField
                 }
                 .padding(DS.Layout.paneInset)
             }
@@ -435,10 +438,23 @@ struct ExampleEditorSheet: View {
     }
 
     @ViewBuilder private var genericFields: some View {
+        // Derived from the example's own prompt, mirroring the Single-shot variable model. (Variables
+        // may ALSO feed the template's instructions, which this editor can't see — so we only flag
+        // tokens the prompt itself references but no row binds, never "unused" rows.)
+        let promptTokens = Vars.keys(in: genInput)
+        let providedKeys = Set(genVars.map { $0.key.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let missing = promptTokens.filter { !providedKeys.contains($0) }
+        let malformed = PromptAnalysis.malformedTokens(in: genInput)
+
         VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
             DSSectionHeader("Prompt")
             DSField(label: "Prompt sent to the model") {
                 TextEditor(text: $genInput).font(.dsBody).dsEditor(lines: 5)
+            }
+            if !malformed.isEmpty {
+                Label("Malformed tokens (won't resolve): \(malformed.joined(separator: ", "))",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.dsCaption).foregroundStyle(.dsWarning).fixedSize(horizontal: false, vertical: true)
             }
         }
         VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
@@ -458,13 +474,37 @@ struct ExampleEditorSheet: View {
                     .buttonStyle(.borderless)
                 }
             }
-            Button { genVars.append(VarDraft(key: "", value: "")) } label: { Label("Add variable", systemImage: "plus") }
+            HStack(spacing: DS.Space.sm) {
+                Button { genVars.append(VarDraft(key: "", value: "")) } label: { Label("Add variable", systemImage: "plus") }
+                if !missing.isEmpty {
+                    Button {
+                        for m in missing where !genVars.contains(where: { $0.key.trimmingCharacters(in: .whitespaces) == m }) {
+                            genVars.append(VarDraft(key: m, value: ""))
+                        }
+                    } label: { Label("Add missing (\(missing.count))", systemImage: "wand.and.stars") }
+                }
+            }
+            if !missing.isEmpty {
+                Text("Prompt references \(missing.map { "{{\($0)}}" }.joined(separator: ", ")) with no variable row.")
+                    .font(.dsCaption).foregroundStyle(.dsWarning).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private var expectedOutputField: some View {
+        VStack(alignment: .leading, spacing: DS.Layout.fieldGap) {
+            DSSectionHeader("Expected output (reference)")
+            DSField(label: "Optional ground truth",
+                    help: "Scored against the run output in the Lab (exact / JSON / token match). Leave blank to skip.") {
+                TextEditor(text: $expectedOutput).font(.dsCode).dsEditor(lines: 4)
+            }
         }
     }
 
     private func load() {
         guard case .edit(let e) = target else { return }
         label = e.label
+        expectedOutput = e.expectedOutput
         switch e.task {
         case .gloss:
             if let g = e.glossInput { sentence = g.sentence; learning = g.learning; native = g.native }
@@ -499,14 +539,16 @@ struct ExampleEditorSheet: View {
                                         .filter { !$0.0.isEmpty }, uniquingKeysWith: { _, b in b })
             json = JSONCoder.encode(GenericInput(input: genInput, variables: vars))
         }
+        let reference = expectedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         switch target {
         case .new(let d):
-            let ex = ExampleModel(task: task, label: trimmedLabel, inputJSON: json)
+            let ex = ExampleModel(task: task, label: trimmedLabel, inputJSON: json, expectedOutput: reference)
             ex.dataset = d                       // inverse populates dataset.examples
             context.insert(ex)
         case .edit(let e):
             e.label = trimmedLabel
             e.inputJSON = json
+            e.expectedOutput = reference
         }
         try? context.save()
         dismiss()

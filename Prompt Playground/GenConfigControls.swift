@@ -11,11 +11,58 @@ import SwiftUI
 
 struct GenConfigControls: View {
     @Binding var config: GenConfig
+    @State private var showSamplingInfo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            Toggle(isOn: greedy) {
-                Text("Greedy (deterministic)").font(.dsLabel)
+            HStack(spacing: DS.Space.xs) {
+                Text("Sampling").font(.dsLabel)
+                Button { showSamplingInfo.toggle() } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("What do these sampling modes mean?")
+                .popover(isPresented: $showSamplingInfo, arrowEdge: .bottom) { samplingInfo }
+                Spacer(minLength: 0)
+            }
+            Picker("Sampling", selection: $config.sampling) {
+                Text("Default").tag(GenConfig.Sampling.default)
+                Text("Greedy").tag(GenConfig.Sampling.greedy)
+                Text("Top-k").tag(GenConfig.Sampling.topK)
+                Text("Nucleus").tag(GenConfig.Sampling.nucleus)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if config.sampling == .topK {
+                Stepper(value: topK, in: 1...100) {
+                    HStack { Text("Top-k").font(.dsLabel); Text("\(config.topK ?? 50)").font(.dsMicro).foregroundStyle(.secondary) }
+                }
+            }
+            if config.sampling == .nucleus {
+                HStack {
+                    Text("Threshold p").font(.dsLabel)
+                    Text(String(format: "%.2f", config.probabilityThreshold ?? 0.9)).font(.dsMicro).foregroundStyle(.secondary)
+                }
+                Slider(value: probabilityThreshold, in: 0.05...1.0, step: 0.05)
+            }
+            if config.sampling == .topK || config.sampling == .nucleus {
+                Toggle(isOn: seedOn) {
+                    HStack {
+                        Text("Seed (reproducible)").font(.dsLabel)
+                        if let s = config.seed { Text("\(s)").font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary) }
+                    }
+                }
+                if config.seed != nil {
+                    HStack(spacing: DS.Space.sm) {
+                        TextField("seed", value: seedValue, format: .number).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                        Button { config.seed = UInt64.random(in: 0...UInt64(UInt32.max)) } label: {
+                            Image(systemName: "shuffle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Randomize the seed")
+                    }
+                }
             }
             Toggle(isOn: temperatureOn) {
                 HStack {
@@ -41,9 +88,41 @@ struct GenConfigControls: View {
         .font(.dsBody)
     }
 
+    // Plain-language explainer for the four sampling modes — shown from the ⓘ next to "Sampling".
+    private var samplingInfo: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            Text("How the model picks each next word").font(.dsLabel)
+            infoRow("Default", "The model's built-in strategy — a balanced choice for everyday runs when you're not tuning for determinism or variety.")
+            infoRow("Greedy", "Always takes the single most likely word. Fully deterministic: the same input gives the same output every time. Best for reproducible evals and structured extraction.")
+            infoRow("Top-k", "Chooses from the k most likely words. Controlled variety — a lower k stays safe and on-topic, a higher k explores more.")
+            infoRow("Nucleus", "Chooses from the smallest set of words whose probabilities add up to p (also called top-p). It widens or narrows the options to match the model's confidence — usually more natural than Top-k.")
+            Divider().padding(.vertical, DS.Space.xxs)
+            Text("Temperature sharpens (low) or flattens (high) those odds. Set a Seed to make Top-k and Nucleus reproducible.")
+                .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(DS.Space.md)
+        .frame(width: 320)
+    }
+
+    private func infoRow(_ name: String, _ desc: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.dsCaption).fontWeight(.semibold)
+            Text(desc).font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // GenConfig <-> toggle/value bindings.
-    private var greedy: Binding<Bool> {
-        Binding(get: { config.sampling == .greedy }, set: { config.sampling = $0 ? .greedy : .default })
+    private var topK: Binding<Int> {
+        Binding(get: { config.topK ?? 50 }, set: { config.topK = $0 })
+    }
+    private var probabilityThreshold: Binding<Double> {
+        Binding(get: { config.probabilityThreshold ?? 0.9 }, set: { config.probabilityThreshold = $0 })
+    }
+    private var seedOn: Binding<Bool> {
+        Binding(get: { config.seed != nil }, set: { config.seed = $0 ? (config.seed ?? 42) : nil })
+    }
+    private var seedValue: Binding<UInt64> {
+        Binding(get: { config.seed ?? 42 }, set: { config.seed = $0 })
     }
     private var temperatureOn: Binding<Bool> {
         Binding(get: { config.temperature != nil },

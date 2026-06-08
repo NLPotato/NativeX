@@ -496,37 +496,15 @@ private struct StageCard: View {
     let stage: PlaygroundModel.PipelineStage
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HStack(spacing: DS.Space.sm) {
-                statusGlyph
-                Text(stage.title).font(.dsLabel)
-                Spacer()
-                if let ms = stage.ms {
-                    Text("\(ms) ms").font(.dsCaption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
-            if let note = stage.note, !note.isEmpty {
-                Text(note).font(.dsCaption)
-                    .foregroundStyle(stage.status == .error ? Color.dsDanger : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !stage.body.isEmpty {
-                Text(stage.body)
-                    .font(.dsCode)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(DS.Space.sm)
-                    .codeSurface()
-            }
-        }
-        .dsCard(raised: stage.kind == .finalOutput)
+        StageCardView(title: stage.title, status: status, text: stage.body,
+                      ms: stage.ms, note: stage.note, raised: stage.kind == .finalOutput)
     }
 
-    @ViewBuilder private var statusGlyph: some View {
+    private var status: StageCardView.Status {
         switch stage.status {
-        case .running: ProgressView().controlSize(.small)
-        case .ok:      Image(systemName: "checkmark.circle.fill").foregroundStyle(.dsSuccess).font(.dsCaption)
-        case .error:   Image(systemName: "xmark.circle.fill").foregroundStyle(.dsDanger).font(.dsCaption)
+        case .running: return .running
+        case .ok:      return .ok
+        case .error:   return .error
         }
     }
 }

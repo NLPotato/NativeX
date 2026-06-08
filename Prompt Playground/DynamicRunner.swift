@@ -35,34 +35,25 @@ enum DynamicRunner {
         }
     }
 
-    /// Generic lane with a custom output schema: pre-hooks → resolve → dynamic respond → post-hooks.
-    /// Metrics are scored on the RAW model JSON; the stored output reflects any post-hook transform.
+    /// Generic lane with a custom output schema: pre-hooks → resolve → STREAM the dynamic schema →
+    /// post-hooks, assembling the same staged RunTrace as the text lane. Metrics are scored on the
+    /// RAW model JSON; the stored output reflects any post-hook transform.
     static func runGeneric(template: String, input: GenericInput, def: SchemaDef, config: GenConfig,
-                           hooks: HookPipelineDef) async -> RunResultData {
-        var ctx = input.variables
-        ctx["prompt"] = input.input
-        ctx["input"] = input.input   // legacy alias for {{input}}
-        _ = await HookEngine.runPre(hooks.pre, context: &ctx)
-        let resolvedInstructions = resolveGeneric(template, ctx)
-        let userPrompt = resolveGeneric(input.input, ctx)
-        let session = LanguageModelSession(instructions: resolvedInstructions)
-        let start = Date()
-        do {
-            let content = try await DynamicRun.respond(session: session, prompt: userPrompt,
-                                                       def: def, options: config.toOptions())
-            let raw = prettyJSONString(content.jsonString)
-            let (final, _) = await HookEngine.runPost(hooks.post, output: raw, context: ctx)
-            let latency = millis(since: start)
-            let contextTokens = TokenEstimator.estimate(session.transcript)
-            let metrics = GenericEvaluator.metrics(
-                json: raw, decoded: true, latencyMs: latency,
-                resolvedPrompt: resolvedInstructions + "\n" + userPrompt,
-                expectedLanguage: ctx["native"] ?? ctx["learning"] ?? "", context: contextTokens)
-            return RunResultData(outputJSON: final, turnsJSON: nil, errorText: nil, metrics: metrics)
-        } catch {
-            let (type, text) = classify(error)
-            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
-                                 metrics: .failure(type, latencyMs: millis(since: start)))
+                           hooks: HookPipelineDef, prewarm: Bool = false) async -> RunResultData {
+        await GenericPipeline.run(template: template, input: input, config: config, hooks: hooks,
+                                  prewarm: prewarm, schemaInjected: true,
+                                  expectedLanguageKeys: ["native", "learning"]) { session, prompt in
+            let schema = try SchemaBuilder.generationSchema(from: def)
+            var raw = ""
+            var ttft: Int? = nil
+            let s = Date()
+            for try await snapshot in session.streamResponse(to: prompt, schema: schema,
+                                                             includeSchemaInPrompt: true,
+                                                             options: config.toOptions()) {
+                if ttft == nil { ttft = millis(since: s) }
+                raw = snapshot.rawContent.jsonString          // cumulative — last snapshot is complete
+            }
+            return (prettyJSONString(raw), ttft, millis(since: s))
         }
     }
 

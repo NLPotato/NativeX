@@ -144,17 +144,20 @@ final class ExampleModel {
     var inputJSON: String          // GlossInput or RoleplayInput, encoded
     var dataset: DatasetModel?
 
+    var expectedOutput: String = ""   // optional ground-truth reference for reference-based scoring
+
     var task: TaskKind { TaskKind(rawValue: taskRaw) ?? .gloss }
     var glossInput: GlossInput? { JSONCoder.decode(GlossInput.self, inputJSON) }
     var roleplayInput: RoleplayInput? { JSONCoder.decode(RoleplayInput.self, inputJSON) }
     var genericInput: GenericInput? { JSONCoder.decode(GenericInput.self, inputJSON) }
 
-    init(task: TaskKind, label: String, inputJSON: String) {
+    init(task: TaskKind, label: String, inputJSON: String, expectedOutput: String = "") {
         self.id = UUID()
         self.createdAt = Date()
         self.taskRaw = task.rawValue
         self.label = label
         self.inputJSON = inputJSON
+        self.expectedOutput = expectedOutput
     }
 }
 
@@ -174,6 +177,8 @@ final class ExperimentModel {
     var hooksJSON: String = "{}"   // HookPipelineDef snapshot — which hooks produced this experiment
     var datasetName: String
     var status: String             // "running" | "done" | "cancelled"
+    var sweepID: UUID? = nil       // groups the experiments produced by one variant sweep
+    var prewarmed: Bool = false    // session.prewarm() was called before timing
     @Relationship(deleteRule: .cascade, inverse: \RunModel.experiment)
     var runs: [RunModel]
 
@@ -184,7 +189,7 @@ final class ExperimentModel {
 
     init(task: TaskKind, label: String, templateName: String, templateVersion: Int,
          instructions: String, schemaID: String, genConfig: GenConfig, datasetName: String,
-         hooks: HookPipelineDef = .empty) {
+         hooks: HookPipelineDef = .empty, sweepID: UUID? = nil, prewarmed: Bool = false) {
         self.id = UUID()
         self.createdAt = Date()
         self.taskRaw = task.rawValue
@@ -197,6 +202,8 @@ final class ExperimentModel {
         self.hooksJSON = JSONCoder.encode(hooks)
         self.datasetName = datasetName
         self.status = "running"
+        self.sweepID = sweepID
+        self.prewarmed = prewarmed
         self.runs = []
     }
 }
@@ -228,8 +235,13 @@ final class RunModel {
     var contextTokensEst: Int
     var contextHeadroom: Int
     var onTargetLanguage: Double?
+    // First-class mirrors of the new metric fields (sortable in leaderboards / comparison tables).
+    var ttftMs: Int? = nil
+    var tokensPerSec: Double? = nil
+    var referenceMatch: Double? = nil
 
     var metricsJSON: String         // full RunMetrics, encoded
+    var traceJSON: String = "{}"    // RunTrace snapshot — the staged pipeline view for this run
 
     // Subjective (Phase 2).
     var manualRating: Int?          // 1–5
@@ -238,9 +250,10 @@ final class RunModel {
     var experiment: ExperimentModel?
 
     var metrics: RunMetrics? { JSONCoder.decode(RunMetrics.self, metricsJSON) }
+    var trace: RunTrace? { let t = JSONCoder.decode(RunTrace.self, traceJSON); return (t?.isEmpty ?? true) ? nil : t }
 
     init(exampleLabel: String, inputJSON: String, outputJSON: String, turnsJSON: String? = nil,
-         errorText: String? = nil, metrics: RunMetrics) {
+         errorText: String? = nil, metrics: RunMetrics, trace: RunTrace? = nil) {
         self.id = UUID()
         self.createdAt = Date()
         self.exampleLabel = exampleLabel
@@ -256,7 +269,11 @@ final class RunModel {
         self.contextTokensEst = metrics.contextTokensEst
         self.contextHeadroom = metrics.contextHeadroom
         self.onTargetLanguage = metrics.onTargetLanguage
+        self.ttftMs = metrics.ttftMs
+        self.tokensPerSec = metrics.tokensPerSec
+        self.referenceMatch = metrics.referenceMatch
         self.metricsJSON = JSONCoder.encode(metrics)
+        self.traceJSON = trace.map(JSONCoder.encode) ?? "{}"
         self.manualRating = nil
         self.judgeJSON = nil
     }
