@@ -13,6 +13,7 @@
 import Foundation
 import NaturalLanguage
 import FoundationModels
+import SQLite3
 
 // MARK: - Task kind
 
@@ -20,6 +21,31 @@ enum TaskKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case gloss, roleplay
     var id: String { rawValue }
     var label: String { self == .gloss ? "Gloss" : "Role-play" }
+}
+
+// MARK: - Proficiency
+// Drives deterministic word-selection in the gloss pipeline: words whose Zipf frequency is at or
+// above `glossCutoff` are assumed already-known and are NOT sent to the model to gloss (beginner
+// glosses everything). A single numeric knob so the three levels just sample a curve that can be
+// re-tuned without touching call sites. Cutoffs are tuned empirically — see ADR-20260608.
+
+enum Proficiency: String, Codable, CaseIterable, Sendable {
+    case beginner, intermediate, advanced
+
+    /// Zipf threshold (≈1–8) at/above which a word is assumed known and skipped. nil = gloss all.
+    var glossCutoff: Double? {
+        switch self {
+        case .beginner:     return nil
+        case .intermediate: return 6.0
+        case .advanced:     return 5.0
+        }
+    }
+
+    /// Lenient parse from a free-text label ("Advanced"/"advanced"); defaults to intermediate.
+    init(label: String) {
+        let key = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self = Proficiency(rawValue: key) ?? .intermediate
+    }
 }
 
 // MARK: - Generation config (Codable mirror of GenerationOptions)
@@ -194,6 +220,9 @@ struct EnrichedToken: Codable, Equatable, Sendable {
     var pos: String?
     var lemma: String?
     var romanization: String?
+    /// Zipf frequency (≈1–8) of the word family (looked up by lemma where available, else surface),
+    /// or nil when rarer than the bundled list's floor. Drives proficiency word-selection.
+    var zipf: Double?
 }
 
 extension LanguageTools {
@@ -226,6 +255,7 @@ extension LanguageTools {
             tagger.setLanguage(lang, range: sentence.startIndex..<sentence.endIndex)
         }
         let localeID = lang?.rawValue ?? name
+        let freqCode = lang.map(wordfreqCode(for:))
 
         return ranges.map { range in
             let surface = String(sentence[range])
@@ -239,9 +269,17 @@ extension LanguageTools {
                 lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
             }
             let rom = nonLatin ? latinTranscription(surface, localeID: localeID) : nil
+            // Look up by lemma where available (word-family frequency), else by surface.
+            let zipf = freqCode.flatMap { FrequencyDB.shared.zipf(lemma ?? surface, lang: $0) }
             return EnrichedToken(surface: surface, pos: pos, lemma: lemma,
-                                 romanization: (rom?.isEmpty == false) ? rom : nil)
+                                 romanization: (rom?.isEmpty == false) ? rom : nil, zipf: zipf)
         }
+    }
+
+    /// wordfreq language code (base subtag of the NLLanguage code: "zh-Hans" → "zh", "de" → "de"),
+    /// used to query the bundled frequency DB.
+    static func wordfreqCode(for lang: NLLanguage) -> String {
+        String(lang.rawValue.split(separator: "-").first ?? Substring(lang.rawValue))
     }
 
     /// Rule-based Latin reading via CFStringTokenizer (pinyin / romaji / romaja). Deterministic,
@@ -260,6 +298,41 @@ extension LanguageTools {
             t = CFStringTokenizerAdvanceToNextToken(tok)
         }
         return parts.joined(separator: " ")
+    }
+}
+
+// MARK: - Bundled word-frequency lookup (Stage 4)
+// There is no on-device word-frequency API, so the proficiency word-selection lever ships its own
+// data: a small read-only SQLite (word → Zipf) bundled with the app, derived from wordfreq
+// (CC-BY-SA 4.0; see Resources/freq_LICENSE.txt + tools/build_freq_db.py). libsqlite3 + the bundled
+// file work identically on iOS (verified against the iOS 26 SDK). Missing word → nil → treat as rare.
+
+final class FrequencyDB: @unchecked Sendable {
+    static let shared = FrequencyDB()
+    private let db: OpaquePointer?
+    // SQLite wants to copy bound strings (they're Swift temporaries), so pass the TRANSIENT destructor.
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    private init() {
+        var handle: OpaquePointer?
+        if let url = Bundle.main.url(forResource: "freq", withExtension: "sqlite"),
+           sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+            db = handle
+        } else {
+            db = nil   // DB absent (e.g. headless harness) → all lookups return nil → gloss everything.
+        }
+    }
+
+    /// Zipf frequency (≈1–8) of `word` in wordfreq language code `lang` (e.g. "de"), or nil when the
+    /// word is absent (rarer than the bundled floor) or the DB is unavailable.
+    func zipf(_ word: String, lang: String) -> Double? {
+        guard let db, !word.isEmpty else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT z FROM freq WHERE lang=? AND word=? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, lang, -1, Self.transient)
+        sqlite3_bind_text(stmt, 2, word.lowercased(), -1, Self.transient)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Double(sqlite3_column_int(stmt, 0)) / 100.0 : nil
     }
 }
 

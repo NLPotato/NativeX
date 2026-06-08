@@ -32,13 +32,13 @@ func classify(_ error: Error) -> (type: String, text: String) {
 }
 
 /// Resolve {{learning}}/{{native}} (canonical) plus legacy {{source}}/{{target}} aliases.
-func resolveGloss(_ template: String, _ input: GlossInput) -> String {
+func resolveGloss(_ template: String, _ input: GlossInput, proficiency: String = "intermediate") -> String {
     template
         .replacingOccurrences(of: "{{learning}}", with: input.learning)
         .replacingOccurrences(of: "{{native}}", with: input.native)
         .replacingOccurrences(of: "{{source}}", with: input.learning)
         .replacingOccurrences(of: "{{target}}", with: input.native)
-        .replacingOccurrences(of: "{{proficiency}}", with: "intermediate") // per-example proficiency: future GlossInput field
+        .replacingOccurrences(of: "{{proficiency}}", with: proficiency)
 }
 
 func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
@@ -54,12 +54,13 @@ func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
 
 @MainActor
 enum GlossRunner {
-    static func run(template: String, input: GlossInput, config: GenConfig) async -> RunResultData {
-        let resolved = resolveGloss(template, input)
+    static func run(template: String, input: GlossInput, config: GenConfig,
+                    proficiency: Proficiency = .intermediate) async -> RunResultData {
+        let resolved = resolveGloss(template, input, proficiency: proficiency.rawValue)
         let start = Date()
         do {
             let out = try await GlossPipeline.run(sentence: input.sentence, learning: input.learning,
-                                                  instructions: resolved, config: config)
+                                                  proficiency: proficiency, instructions: resolved, config: config)
             let latency = millis(since: start)
             let outputJSON = prettyJSON(out.result)
             let (gloss, lang) = Evaluators.gloss(out.result, sentence: input.sentence, native: input.native)

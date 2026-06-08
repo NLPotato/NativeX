@@ -12,11 +12,12 @@ import Observation
 import FoundationModels
 
 // MARK: - Schemas
-// The on-device model only ANNOTATES a pre-segmented word list — deterministic NLTokenizer owns
-// the surfaces (LanguageTools.enrich); it never produces the word list itself. The model-facing
-// schema is built at RUNTIME (GlossPipeline) as a DynamicGenerationSchema so the `meanings` array
-// can be pinned to exactly N elements (one per token). A typed @Generable can't express a runtime
-// length, and eval showed an unpinned array silently misaligns (e.g. 2 meanings for 7 words).
+// The on-device model only ANNOTATES a deterministically segmented word list — NLTokenizer owns the
+// surfaces (LanguageTools.enrich); the model never produces the list. The model-facing schema is built
+// at RUNTIME (GlossPipeline) as a DynamicGenerationSchema: a `words` array of {surface, meaning} objects
+// pinned to exactly the number of SELECTED words (proficiency word-selection), so each gloss is bound to
+// its word and the count can't drift. A typed @Generable can't express a runtime length, and eval showed
+// both an unpinned array and a bare parallel meanings[] misalign (count drift / cascade shift).
 // GlossWordGen / GlossResultGen are the MERGED DTOs (deterministic fields + model annotations),
 // rendered as JSON in the output pane and scored by Evaluators.gloss.
 // See docs/decisions/ADR-20260608-hybrid-gloss-pipeline.md.
@@ -27,8 +28,10 @@ struct GlossWordGen: Codable, Equatable {
     var surface: String
     var lemma: String
     var partOfSpeech: String
-    var translation: String
+    var translation: String          // "" when the word was skipped (common enough for this proficiency)
     var romanization: String?
+    var zipf: Double?                 // word-family frequency (Zipf, ≈1–8); nil if rarer than the bundled floor
+    var glossed: Bool                 // false = skipped as already-known for this proficiency (no model gloss)
 }
 
 /// Merged gloss result rendered in the output pane and scored by `Evaluators.gloss`.
@@ -54,21 +57,22 @@ let presets: [PromptPreset] = [
         name: "Gloss",
         defaultInstructions: """
         You are a {{learning}} tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
-        You are given the words of a {{learning}} sentence, already segmented, in order. For EACH word, in the \
-        same order, give its single best meaning IN THIS SENTENCE (not its most common dictionary meaning) as one \
-        short {{native}} gloss, plus its part of speech. Provide exactly one meaning per word; do not add, remove, \
-        or reorder words. Then give a natural {{native}} translation of the whole sentence. Keep meanings simple \
-        and literal for beginners; precise and idiomatic for advanced learners. If unsure of a word, give your \
-        best single guess.
+        You are given a {{learning}} sentence and, below it, a numbered list of selected words from it (only the \
+        words worth explaining for this learner — not every word). For EACH listed word, in the same order, output \
+        an entry containing the word copied exactly and its single best meaning IN THIS SENTENCE (not its most \
+        common dictionary meaning) as one short {{native}} gloss. Provide exactly one entry per listed word; do not \
+        add, remove, or reorder them. Also give a natural {{native}} translation of the WHOLE sentence. Keep meanings \
+        simple and literal for beginners; precise and idiomatic for advanced learners. If unsure, give your best guess.
         """
     )
 ]
 
 // MARK: - Gloss pipeline (shared by the single-shot tab + the headless Lab runner)
 // Inverted, hybrid flow: NLTokenizer / NLTagger / CFStringTokenizer own the word list, POS/lemma,
-// and romanization (LanguageTools.enrich); the model only annotates that fixed list. The model-facing
-// schema is built at runtime, pinned to N elements, so the per-word arrays can't misalign; a default
-// output-token cap prevents the runaway that overflowed the 4096 window in eval.
+// and romanization (LanguageTools.enrich); the model only annotates the SELECTED subset (proficiency
+// word-selection by bundled Zipf frequency). The model-facing schema is built at runtime — a
+// {surface, meaning} object array pinned to the selected count — so glosses bind to their word and
+// can't misalign; a default output-token cap prevents the runaway that overflowed the 4096 window.
 // See docs/decisions/ADR-20260608-hybrid-gloss-pipeline.md.
 
 @MainActor
@@ -78,48 +82,84 @@ enum GlossPipeline {
         let promptSent: String       // the token-list prompt
     }
 
-    private struct Annotation { var meanings: [String]; var partsOfSpeech: [String]; var sentenceTranslation: String }
+    private struct Item { var surface: String; var meaning: String; var pos: String? }
+    private struct Annotation { var items: [Item]; var sentenceTranslation: String }
 
-    static func run(sentence: String, learning: String, instructions: String,
-                    config: GenConfig) async throws -> Output {
+    static func run(sentence: String, learning: String, proficiency: Proficiency,
+                    instructions: String, config: GenConfig) async throws -> Output {
         let tokens = LanguageTools.enrich(sentence, language: learning)
-        let n = tokens.count
         // NLTagger covers POS for its 8 languages; for others the model supplies POS (vocabulary-constrained).
         let modelPOS = !(LanguageTools.language(named: learning).map(LanguageTools.taggedLanguages.contains) ?? false)
-        let list = tokens.enumerated().map { "\($0.offset + 1). \($0.element.surface)" }.joined(separator: "\n")
-        let prompt = "Words (in order):\n\(list)"
+
+        // Proficiency word-selection: gloss only words BELOW the cutoff. Absent-from-list (rarer than the
+        // bundled floor) ⇒ rare ⇒ gloss; nil cutoff (beginner) ⇒ gloss everything.
+        let cutoff = proficiency.glossCutoff
+        let glossIdx = tokens.indices.filter { i in
+            guard let cutoff, let z = tokens[i].zipf else { return true }
+            return z < cutoff
+        }
+        let m = glossIdx.count
+
+        // The model always sees the FULL sentence (so the whole-sentence translation is accurate) plus the
+        // numbered subset to explain. Sending only the subset's meanings is what shrinks output tokens.
+        let list = glossIdx.enumerated().map { "\($0.offset + 1). \(tokens[$0.element].surface)" }.joined(separator: "\n")
+        let prompt = m == 0 ? "Sentence:\n\(sentence)"
+                            : "Sentence:\n\(sentence)\n\nWords to explain (in order):\n\(list)"
 
         var cfg = config
         if cfg.maximumResponseTokens == nil { cfg.maximumResponseTokens = 700 } // anti-runaway default
         let options = cfg.toOptions()
-        let schema = try annotationSchema(count: n, includePOS: modelPOS)
+        let schema = try annotationSchema(count: m, includePOS: modelPOS)
 
         func annotate() async throws -> Annotation {
             let content = try await LanguageModelSession(instructions: instructions)
                 .respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content
             guard let data = content.jsonString.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return Annotation(meanings: [], partsOfSpeech: [], sentenceTranslation: "")
+                return Annotation(items: [], sentenceTranslation: "")
             }
-            return Annotation(meanings: (obj["meanings"] as? [String]) ?? [],
-                              partsOfSpeech: (obj["partsOfSpeech"] as? [String]) ?? [],
-                              sentenceTranslation: (obj["sentenceTranslation"] as? String) ?? "")
+            let raw = (obj["words"] as? [[String: Any]]) ?? []
+            let items = raw.map { Item(surface: $0["surface"] as? String ?? "",
+                                       meaning: $0["meaning"] as? String ?? "",
+                                       pos: $0["pos"] as? String) }
+            return Annotation(items: items, sentenceTranslation: (obj["sentenceTranslation"] as? String) ?? "")
         }
 
-        // The schema pins `meanings` to N elements, so counts can't drift; retry once only if the
-        // model still left most glosses blank (a sign of a degenerate generation).
+        // Each gloss is bound to its word inside one JSON object, so the model can't cascade-shift the
+        // way a bare parallel meanings[] did; retry once only if it still left most glosses blank.
         var ann = try await annotate()
-        if ann.meanings.filter({ $0.trimmingCharacters(in: .whitespaces).isEmpty }).count * 2 > max(n, 1) {
+        if m > 0, ann.items.filter({ $0.meaning.trimmingCharacters(in: .whitespaces).isEmpty }).count * 2 > m {
             ann = try await annotate()
         }
 
-        let words = tokens.enumerated().map { i, tok in
-            GlossWordGen(
+        // Merge: bind each returned entry to its token by the echoed surface (realigning if the model
+        // drifts), falling back to positional so a non-matching echo never drops a selected word.
+        func norm(_ s: String) -> String { s.lowercased().trimmingCharacters(in: .whitespaces) }
+        let glossSet = Set(glossIdx)
+        var meaningFor: [Int: String] = [:]
+        var posFor: [Int: String] = [:]
+        var cursor = 0
+        for oi in glossIdx {
+            let expected = norm(tokens[oi].surface)
+            let pick: Int? = (cursor < ann.items.count && norm(ann.items[cursor].surface) == expected)
+                ? cursor
+                : ((cursor..<ann.items.count).first { norm(ann.items[$0].surface) == expected } ?? (cursor < ann.items.count ? cursor : nil))
+            if let k = pick {
+                meaningFor[oi] = ann.items[k].meaning
+                posFor[oi] = ann.items[k].pos ?? ""
+                cursor = k + 1
+            }
+        }
+        let words = tokens.enumerated().map { i, tok -> GlossWordGen in
+            let modelPos = posFor[i].flatMap { $0.isEmpty ? nil : $0 }
+            return GlossWordGen(
                 surface: tok.surface,
-                lemma: tok.lemma ?? tok.surface,                                       // CJK: no NLTagger lemma → surface
-                partOfSpeech: tok.pos ?? (i < ann.partsOfSpeech.count ? ann.partsOfSpeech[i] : "other"),
-                translation: i < ann.meanings.count ? ann.meanings[i] : "",
-                romanization: tok.romanization)
+                lemma: tok.lemma ?? tok.surface,                 // CJK: no NLTagger lemma → surface
+                partOfSpeech: tok.pos ?? modelPos ?? "other",
+                translation: meaningFor[i] ?? "",
+                romanization: tok.romanization,
+                zipf: tok.zipf,
+                glossed: glossSet.contains(i))
         }
         return Output(result: GlossResultGen(words: words, sentenceTranslation: ann.sentenceTranslation),
                       promptSent: prompt)
@@ -129,15 +169,19 @@ enum GlossPipeline {
     /// exactly `count` elements so the per-word arrays can't misalign; POS constrained to the vocabulary.
     private static func annotationSchema(count: Int, includePOS: Bool) throws -> GenerationSchema {
         func str() -> DynamicGenerationSchema { DynamicGenerationSchema(type: String.self) }
-        func pinned(_ leaf: DynamicGenerationSchema) -> DynamicGenerationSchema {
-            DynamicGenerationSchema(arrayOf: leaf, minimumElements: count, maximumElements: count)
-        }
-        var props: [DynamicGenerationSchema.Property] = [
-            .init(name: "meanings", description: "In-context meaning of each given word, in order, one per word", schema: pinned(str()))
+        var wordProps: [DynamicGenerationSchema.Property] = [
+            .init(name: "surface", description: "The word being explained, copied exactly from the list", schema: str()),
+            .init(name: "meaning", description: "In-context meaning of this word as one short gloss in the learner's native language", schema: str())
         ]
         if includePOS {
-            props.append(.init(name: "partsOfSpeech", description: "Part of speech of each given word, in order",
-                               schema: pinned(DynamicGenerationSchema(type: String.self, guides: [.anyOf(LanguageTools.posVocabulary)]))))
+            wordProps.append(.init(name: "pos", description: "Part of speech of this word",
+                                   schema: DynamicGenerationSchema(type: String.self, guides: [.anyOf(LanguageTools.posVocabulary)])))
+        }
+        let word = DynamicGenerationSchema(name: "GlossWord", properties: wordProps)
+        var props: [DynamicGenerationSchema.Property] = []
+        if count > 0 {   // no words selected (all already-known) ⇒ ask only for the sentence translation
+            props.append(.init(name: "words", description: "One entry per given word, in the same order",
+                               schema: DynamicGenerationSchema(arrayOf: word, minimumElements: count, maximumElements: count)))
         }
         props.append(.init(name: "sentenceTranslation", description: "Natural translation of the whole sentence into the learner's native language", schema: str()))
         return try GenerationSchema(root: DynamicGenerationSchema(name: "Gloss", properties: props), dependencies: [])
@@ -270,8 +314,9 @@ final class PlaygroundModel {
                                                            def: customSchema, options: config.toOptions())
                 output = prettyJSONString(content.jsonString)
             } else {
+                let prof = Proficiency(label: variableValues["proficiency"] ?? "")
                 let out = try await GlossPipeline.run(sentence: sentence, learning: source,
-                                                      instructions: resolved, config: config)
+                                                      proficiency: prof, instructions: resolved, config: config)
                 userPrompt = out.promptSent
                 output = prettyJSON(out.result)
             }

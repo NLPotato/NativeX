@@ -86,7 +86,10 @@ enum Evaluators {
 
         var checks = 0, passed = 0
         for w in r.words {
-            for field in [w.surface, w.lemma, w.partOfSpeech, w.translation] {
+            // Skipped (already-known) words legitimately have a blank translation — don't penalize it.
+            var fields = [w.surface, w.lemma, w.partOfSpeech]
+            if w.glossed { fields.append(w.translation) }
+            for field in fields {
                 checks += 1
                 if !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { passed += 1 }
             }

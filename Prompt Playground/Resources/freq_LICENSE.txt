@@ -1,0 +1,4 @@
+Word-frequency data in freq.sqlite is derived from wordfreq v3.1.1
+(https://github.com/rspeer/wordfreq) by Robyn Speer.
+Licensed under Creative Commons Attribution-ShareAlike 4.0 (CC-BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
