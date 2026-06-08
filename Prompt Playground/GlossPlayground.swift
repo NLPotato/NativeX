@@ -113,6 +113,38 @@ let presets: [PromptPreset] = [
         defaultVariables: ["learning": "Korean", "native": "English", "proficiency": "intermediate"]
     ),
     PromptPreset(
+        id: "cjk-morph-deep",
+        name: "Example: CJK morphology — Korean (deep single pass)",
+        defaultInstructions: """
+        You are a {{learning}} morphology tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
+        Below is a {{learning}} sentence and a numbered list of its words, each followed by its reading in [brackets]. \
+        For EACH listed word, in the same order, decompose it into morphemes and give its dictionary form. {{learning}} \
+        verbs and adjectives are heavily conjugated and nouns carry particles — split the SURFACE into a stem plus every \
+        ending/particle, and ALWAYS give the dictionary form in {{learning}}'s OWN script (the plain 다 form for verbs/ \
+        adjectives), NEVER the romanized reading. Also give each word's part of speech, in-context meaning, and a short \
+        usage example. Copy each surface and reading exactly as given — do not re-romanize.
+
+        Worked examples (different words — do not copy them into your answer):
+          • 만나서 → dictionaryForm 만나다 (verb). morphemes: 만나- [stem, "to meet"] + -아서 [ending, "connective 'and so'"].
+          • 봤어요 → dictionaryForm 보다 (verb). morphemes: 보- [stem, "to see"] + -았- [ending, "past"] + -어요 [ending, \
+        "polite informal 해요체"]. note: 보았어요 contracts to 봤어요. register: "polite informal (해요체)".
+        Rule shown by these: strip EVERY ending back to the bare 다 form (만나서 → 만나다, NOT 만나서다; 봤어요 → 보다, NOT 봤다).
+
+        Then give a natural {{native}} translation of the whole sentence and one or two short grammar notes.
+
+        Words:
+        {{words}}
+        """,
+        defaultInput: "어제 친구를 만나서 영화를 봤어요.",
+        hooks: HookPipelineDef(pre: [
+            HookDef(op: .enrichGloss, inputVar: "prompt", outputVar: "words",
+                    params: ["language": "{{learning}}"])
+        ]),
+        useSchema: true,
+        schema: .morphologyFull,
+        defaultVariables: ["learning": "Korean", "native": "English", "proficiency": "intermediate"]
+    ),
+    PromptPreset(
         id: "blank",
         name: "Blank (start here)",
         defaultInstructions: "You are a helpful assistant.",
