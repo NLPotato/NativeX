@@ -29,11 +29,6 @@ struct GlossView: View {
     @State private var showingSchemaSheet = false
     @State private var showingHooksSheet = false
 
-    // Stage-2 CJK morphology drill-down: the segmented words of the last gloss run (empty unless the
-    // output decoded to a non-Latin words[] list) + the per-word fan-out engine.
-    @State private var drilldown = CJKDrilldownModel()
-    @State private var cjkWords: [CJKWord] = []
-
     // The genericized tab saves/loads under the `.generic` task lane.
     @Query(filter: #Predicate<PromptTemplateModel> { $0.taskRaw == "generic" }, sort: \.createdAt)
     private var templates: [PromptTemplateModel]
@@ -278,28 +273,11 @@ struct GlossView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ForEach(model.stages) { StageCard(stage: $0) }
-
-                    if !cjkWords.isEmpty {
-                        CJKDrilldownSection(
-                            model: drilldown, words: cjkWords, context: model.input,
-                            learning: model.variableValues["learning"] ?? "Korean",
-                            native: model.variableValues["native"] ?? "English",
-                            proficiency: model.variableValues["proficiency"] ?? "intermediate",
-                            config: model.config)
-                    }
                 }
                 .padding(DS.Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minWidth: DS.Size.panelMinWidth)
-            .onChange(of: model.output) { _, newOutput in
-                // Chips come from the deterministic segmentation of the INPUT (correct surfaces), gated to
-                // CJK; a run having produced output is the trigger. Reset stale cards on every new run.
-                cjkWords = newOutput.isEmpty
-                    ? []
-                    : CJKMorphology.segment(model.input, learning: model.variableValues["learning"] ?? "Korean")
-                drilldown.reset()
-            }
         }
         .playgroundBackground()
         .runningRadiance(active: model.isRunning)   // neon-green edge glow while a run is in flight

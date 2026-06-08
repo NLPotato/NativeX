@@ -105,45 +105,12 @@ extension SchemaDef {
         ])
     }
 
-    /// Full per-word morphology with STRUCTURED morphemes — the root for Variant A's per-word fan-out.
-    /// As a standalone root it nests one array-of-objects (morphemes), which fits the depth cap; it is
-    /// NOT reused inside `.morphologyFull` (a second array-of-objects level would exceed maxDepth — an
-    /// array-of-objects costs two depth levels, so words[].morphemes[] is too deep).
-    private static var morphologyWordObject: ObjectDef {
-        let morpheme = ObjectDef(name: "Morpheme", description: "One morpheme: a stem or an attached ending/particle", fields: [
-            Field(name: "form", description: "This morpheme's surface text, in the original script", type: .string),
-            Field(name: "type", description: "Morpheme role in the word",
-                  type: .enumeration(cases: ["stem", "ending", "particle", "suffix", "prefix", "other"])),
-            Field(name: "meaning", description: "What this morpheme contributes, as one short gloss in the learner's native language", type: .string),
-        ])
-        return ObjectDef(name: "MorphologyWord", description: "One word, fully decomposed into morphemes with its dictionary form", fields: [
-            Field(name: "surface", description: "Word exactly as it appears, in the original script", type: .string),
-            Field(name: "reading", description: "Pronunciation in Latin letters (romaja / pinyin / romaji), copied from the reading given for this word — do not re-romanize", type: .string),
-            Field(name: "dictionaryForm", description: "Dictionary / base form in the word's OWN script (Hangul / Kanji / Hanzi), never the romanized reading — the plain unconjugated verb/adjective (다 form) or the noun with any attached particle removed", type: .string),
-            Field(name: "morphemes", description: "The surface split into a stem plus every attached ending/particle, in order",
-                  type: .array(of: .object(morpheme), min: nil, max: nil)),
-            Field(name: "conjugation", description: "How the surface is conjugated/inflected from the dictionary form (one short explanation); empty if uninflected", type: .string),
-            Field(name: "partOfSpeech", description: "Part of speech",
-                  type: .enumeration(cases: ["noun", "verb", "adjective", "adverb", "pronoun", "determiner",
-                                             "particle", "numeral", "classifier", "conjunction", "interjection", "other"])),
-            Field(name: "register", description: "Honorific level / politeness / register note, if relevant", type: .string),
-            Field(name: "meaning", description: "In-context meaning as one short gloss in the learner's native language", type: .string),
-            Field(name: "example", description: "One short, natural usage example in the learning language", type: .string),
-        ])
-    }
-
-    /// Per-word morphology as a standalone ROOT — the schema for one focused per-word call (Variant A
-    /// fan-out: tap a word / "Analyze all" in Single-shot, or the headless `CJKMorphologyRunner`).
-    static var morphologyWord: SchemaDef {
-        let w = morphologyWordObject
-        return SchemaDef(typeName: w.name, description: w.description, fields: w.fields)
-    }
-
-    /// Whole-sentence morphology — Variant B's single deep pass. Its per-word morphology is FLATTENED to a
-    /// single `morphemeBreakdown` string because a structured morphemes array-of-objects nested inside the
-    /// `words[]` array-of-objects exceeds maxDepth=3 (proven on-device), and a `[String]` array made the
-    /// model split entries on internal commas. Variant A's per-word fan-out keeps the structured morphemes;
-    /// this coarser shape is the deep-pass tradeoff.
+    /// Whole-sentence CJK morphology — the schema for the "CJK morphology — deep single pass" preset.
+    /// Per-word morphology is FLATTENED to a single `morphemeBreakdown` string because a structured
+    /// morphemes array-of-objects nested inside the `words[]` array-of-objects exceeds maxDepth=3 (proven
+    /// on-device), and a `[String]` array made the model split entries on internal commas. A structured
+    /// per-word schema (with a `morphemes[]` array-of-objects) is only viable as a STANDALONE root — see
+    /// the deferred per-word drill-down design in docs/decisions/ADR-20260608-cjk-two-stage-morphology.md.
     static var morphologyFull: SchemaDef {
         let word = ObjectDef(name: "MorphologyWordFlat", description: "One word, decomposed, with its dictionary form", fields: [
             Field(name: "surface", description: "Word exactly as it appears, in the original script", type: .string),
