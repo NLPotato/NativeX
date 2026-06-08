@@ -6,8 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		ED0478B62FD2AE9A006348E3 /* Prompt Playground.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Prompt Playground.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		ED530C652FD644540059EB14 /* test.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = test.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +36,7 @@
 		ED0478AD2FD2AE9A006348E3 = {
 			isa = PBXGroup;
 			children = (
+				ED530C652FD644540059EB14 /* test.swift */,
 				ED0478B82FD2AE9A006348E3 /* Prompt Playground */,
 				ED0478B72FD2AE9A006348E3 /* Products */,
 			);
