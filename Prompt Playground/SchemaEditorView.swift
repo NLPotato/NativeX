@@ -60,20 +60,19 @@ struct SchemaEditorView: View {
     @Binding var def: SchemaDef
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Schema name").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
-                    TextField("TypeName", text: $def.typeName).textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            VStack(alignment: .leading, spacing: DS.Space.md) {
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    Text("Schema name").font(.dsLabel).foregroundStyle(.secondary)
+                    TextField("TypeName", text: $def.typeName).dsTextField()
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Description").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    Text("Description").font(.dsLabel).foregroundStyle(.secondary)
                     TextField("Guides the model — what this schema represents", text: $def.description)
-                        .textFieldStyle(.roundedBorder).font(.caption)
+                        .dsTextField()
                 }
             }
-            .padding(10)
-            .glassCard(radius: 10)
+            .dsCard()
 
             FieldsEditor(fields: $def.fields, depth: 0)
         }
@@ -87,14 +86,14 @@ struct FieldsEditor: View {
     let depth: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             ForEach($fields) { $field in
                 FieldRow(field: $field, depth: depth) { fields.removeAll { $0.id == field.id } }
             }
             Button {
                 fields.append(SchemaDef.Field(name: "field\(fields.count + 1)", description: "", type: .string))
             } label: { Label("Add field", systemImage: "plus.circle") }
-                .font(.caption).buttonStyle(.borderless)
+                .font(.dsCaption).buttonStyle(.borderless)
         }
     }
 }
@@ -114,33 +113,32 @@ struct FieldRow: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    TextField("name", text: $field.name).textFieldStyle(.roundedBorder).frame(maxWidth: 200)
-                    Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.caption)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                HStack(spacing: DS.Space.sm) {
+                    TextField("name", text: $field.name).dsTextField().frame(maxWidth: 200)
+                    Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.dsCaption)
                 }
-                TextField("description", text: $field.description).textFieldStyle(.roundedBorder).font(.caption)
+                TextField("description", text: $field.description).dsTextField()
                 TypeEditor(type: $field.type, depth: depth)
             }
-            .padding(.top, 6)
+            .padding(.top, DS.Space.sm)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: DS.Space.sm) {
                 Text(field.name.isEmpty ? "unnamed" : field.name)
                     .fontWeight(.medium)
                     .foregroundStyle(field.name.isEmpty ? Color.secondary : Color.primary)
                 Text(field.type.shortLabel)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .font(.dsCaption).foregroundStyle(.secondary)
+                    .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
                     .background(.quaternary, in: Capsule())
                 if field.isOptional {
-                    Text("optional").font(.caption2).foregroundStyle(.tertiary)
+                    Text("optional").font(.dsMicro).foregroundStyle(.tertiary)
                 }
                 Spacer()
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }.buttonStyle(.borderless)
             }
         }
-        .padding(10)
-        .glassCard(radius: 10)
+        .dsCard()
     }
 }
 
@@ -158,7 +156,7 @@ struct TypeEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             Picker("", selection: kind) {
                 ForEach(kinds) { Text($0.label).tag($0) }
             }
@@ -183,22 +181,22 @@ struct EnumCasesEditor: View {
     private func setCases(_ c: [String]) { type = .enumeration(cases: c) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
             ForEach(Array(cases.enumerated()), id: \.offset) { idx, _ in
-                HStack(spacing: 4) {
+                HStack(spacing: DS.Space.xs) {
                     TextField("case", text: Binding(
                         get: { idx < cases.count ? cases[idx] : "" },
                         set: { var c = cases; if idx < c.count { c[idx] = $0; setCases(c) } }))
-                        .textFieldStyle(.roundedBorder)
+                        .dsTextField()
                     Button(role: .destructive) {
                         var c = cases; if idx < c.count { c.remove(at: idx); setCases(c) }
                     } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
                 }
             }
             Button { setCases(cases + ["case\(cases.count + 1)"]) } label: { Label("Add case", systemImage: "plus") }
-                .font(.caption2).buttonStyle(.borderless)
+                .font(.dsMicro).buttonStyle(.borderless)
         }
-        .padding(.leading, 8)
+        .padding(.leading, DS.Space.sm)
     }
 }
 
@@ -228,19 +226,19 @@ struct ArrayEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("count min").font(.caption).foregroundStyle(.secondary)
-                TextField("–", text: minText).frame(width: 44).textFieldStyle(.roundedBorder)
-                Text("max").font(.caption).foregroundStyle(.secondary)
-                TextField("–", text: maxText).frame(width: 44).textFieldStyle(.roundedBorder)
-                Text("of:").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            HStack(spacing: DS.Space.sm) {
+                Text("count min").font(.dsCaption).foregroundStyle(.secondary)
+                TextField("–", text: minText).frame(width: 44).dsTextField()
+                Text("max").font(.dsCaption).foregroundStyle(.secondary)
+                TextField("–", text: maxText).frame(width: 44).dsTextField()
+                Text("of:").font(.dsCaption).foregroundStyle(.secondary)
             }
             TypeEditor(type: element, depth: depth + 1)
         }
-        .padding(.leading, 14)
+        .padding(.leading, DS.Space.lg)
         .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
     }
 }
@@ -261,14 +259,14 @@ struct ObjectEditor: View {
     private var fields: Binding<[SchemaDef.Field]> { Binding(get: { obj.fields }, set: { var o = obj; o.fields = $0; set(o) }) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("Type name", text: name).textFieldStyle(.roundedBorder)
-            TextField("Description", text: desc).textFieldStyle(.roundedBorder).font(.caption)
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            TextField("Type name", text: name).dsTextField()
+            TextField("Description", text: desc).dsTextField()
             FieldsEditor(fields: fields, depth: depth + 1)
         }
-        .padding(.leading, 14)
+        .padding(.leading, DS.Space.lg)
         .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
     }
 }
@@ -301,16 +299,16 @@ struct SchemaEditorSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Guided Generation schema").font(.headline)
+                Text("Guided Generation schema").font(.dsTitle)
                 Spacer()
                 Button("New schema") { def = .blank }
                 Button("Done") { isPresented = false }.keyboardShortcut(.defaultAction)
             }
-            .padding()
+            .padding(DS.Space.lg)
             Divider()
-            ScrollView { SchemaEditorView(def: $def).padding(16) }
+            ScrollView { SchemaEditorView(def: $def).padding(DS.Space.xl) }
         }
-        .frame(minWidth: 560, idealWidth: 620, minHeight: 520, idealHeight: 680)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: 640, minHeight: 520, idealHeight: 680)
         .playgroundBackground()
     }
 }

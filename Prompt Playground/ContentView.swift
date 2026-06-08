@@ -52,11 +52,11 @@ struct GlossView: View {
         HSplitView {
             // INPUT
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: DS.Space.lg) {
                     if let msg = model.availabilityMessage {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(.orange)
+                            .font(.dsBody)
+                            .foregroundStyle(.dsWarning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
@@ -83,20 +83,19 @@ struct GlossView: View {
 
                     sectionHeader("Prompt")
 
-                    field("Prompt") {
-                        TextField("Prompt sent to the model (also the {{prompt}} variable)",
-                                  text: $model.input, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(1...4)
-                            .frame(minHeight: 56)
+                    field("Prompt", help: "Sent to the model — also the {{prompt}} variable.") {
+                        TextField("Type the prompt…", text: $model.input, axis: .vertical)
+                            .font(.dsBody)
+                            .lineLimit(2...6)
+                            .dsEditor(lines: 2)
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Variables").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
-                        VStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: DS.Space.xs) {
+                        Text("Variables").font(.dsLabel).foregroundStyle(.secondary)
+                        VStack(spacing: DS.Space.sm) {
                             if model.variableKeys.isEmpty && model.hookOutputs.isEmpty && model.malformedTokens.isEmpty {
                                 Text("No variables. Add a {{name}} token in Instructions or Prompt.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             ForEach(model.variableKeys, id: \.self) { key in
@@ -107,59 +106,56 @@ struct GlossView: View {
                             if !model.hookOutputs.isEmpty {
                                 Label("Provided by hooks: \(model.hookOutputs.sorted().map { "{{\($0)}}" }.joined(separator: ", "))",
                                       systemImage: "wand.and.stars")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             if model.usesPromptToken {
                                 Label("Provided by the Prompt field: {{prompt}}", systemImage: "text.cursor")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             if !model.malformedTokens.isEmpty {
                                 Label("Unrecognized: \(model.malformedTokens.joined(separator: ", ")). Use letters, digits, or _ inside {{ }}.",
                                       systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption).foregroundStyle(.orange)
+                                    .font(.dsCaption).foregroundStyle(.dsWarning)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             if !model.unusedHookOutputs.isEmpty {
                                 Label("Hook output unused: \(model.unusedHookOutputs.map { "{{\($0)}}" }.joined(separator: ", ")). Nothing reads it — check the hook's “out” name matches a {{token}} in your prompt.",
                                       systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption).foregroundStyle(.orange)
+                                    .font(.dsCaption).foregroundStyle(.dsWarning)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .padding(10)
-                        .glassCard(radius: 8)
+                        .dsCard()
                     }
 
-                    field("Instructions") {
+                    field("Instructions", help: "The system prompt. Reference variables with {{name}}.") {
                         TextEditor(text: $model.instructions)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 240)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                            .font(.dsCode)
+                            .dsEditor(lines: 10)
                     }
 
                     sectionHeader("Pipeline · optional")
 
                     DisclosureGroup("Generation config") {
-                        GenConfigControls(config: $model.config).padding(.top, 4)
+                        GenConfigControls(config: $model.config).padding(.top, DS.Space.xs)
                     }
-                    .font(.callout)
-                    .fontWeight(.semibold)
+                    .font(.dsHeading)
 
                     DisclosureGroup("Guided Generation") {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: DS.Space.sm) {
                             Text("Guided Generation constrains the model to a fixed output schema (structured output) via constrained decoding.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.dsCaption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Toggle("Use a custom output schema", isOn: $model.useCustomSchema)
                             if model.useCustomSchema {
                                 schemaSummary
-                                HStack(spacing: 8) {
+                                HStack(spacing: DS.Space.sm) {
                                     Button { showingSchemaSheet = true } label: {
                                         Label("Edit schema…", systemImage: "curlybraces.square")
                                     }
@@ -173,37 +169,35 @@ struct GlossView: View {
                                         .fixedSize()
                                     }
                                 }
-                                .font(.callout).fontWeight(.regular)
+                                .font(.dsBody)
                                 Text("Runs via DynamicGenerationSchema. Save it + export Swift from “Save to Lab…”.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                             } else {
                                 Text("No schema — the model returns free-form text.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.dsCaption).foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, DS.Space.xs)
                     }
-                    .font(.callout)
-                    .fontWeight(.semibold)
+                    .font(.dsHeading)
                     .sheet(isPresented: $showingSchemaSheet) {
                         SchemaEditorSheet(def: $model.customSchema, isPresented: $showingSchemaSheet)
                     }
 
                     DisclosureGroup("Hooks") {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: DS.Space.sm) {
                             Text("Deterministic native ops or shell scripts run before/after the model. A pre-hook’s output becomes a {{variable}} you can use in the prompt.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.dsCaption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             hooksSummary
                             Button { showingHooksSheet = true } label: {
                                 Label("Edit hooks…", systemImage: "slider.horizontal.3")
                             }
-                            .font(.callout).fontWeight(.regular)
+                            .font(.dsBody).fontWeight(.regular)
                         }
-                        .padding(.top, 4)
+                        .padding(.top, DS.Space.xs)
                     }
-                    .font(.callout)
-                    .fontWeight(.semibold)
+                    .font(.dsHeading)
                     .sheet(isPresented: $showingHooksSheet) {
                         HooksEditorSheet(hooks: $model.hooks,
                                          unusedOutputs: Set(model.unusedHookOutputs),
@@ -213,7 +207,7 @@ struct GlossView: View {
                     Button {
                         Task { await model.run() }
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: DS.Space.sm) {
                             if model.isRunning { ProgressView().controlSize(.small) }
                             Text(model.isRunning ? "Running…" : "Run")
                         }
@@ -250,73 +244,66 @@ struct GlossView: View {
 
                     if let msg = savedMessage {
                         Label(msg, systemImage: "checkmark.circle.fill")
-                            .font(.caption).foregroundStyle(.green)
+                            .font(.dsCaption).foregroundStyle(.dsSuccess)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(16)
+                .padding(DS.Space.xl)
             }
-            .frame(minWidth: 340, idealWidth: 380)
+            .frame(minWidth: DS.Size.panelMinWidth, idealWidth: 420)
 
             // OUTPUT — the run as live pipeline stages.
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: DS.Space.md) {
                     HStack {
-                        Text("Pipeline").font(.headline)
+                        Text("Pipeline").font(.dsTitle)
                         Spacer()
                         if let e = model.elapsed {
                             Text(String(format: "%.2f s", e))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(.dsCaption.monospacedDigit()).foregroundStyle(.secondary)
                         }
                     }
                     if model.stages.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: DS.Space.sm) {
                             Text("A single-shot Foundation Models runner: author a prompt with optional hooks and Guided Generation, run it, and trace the whole pipeline here. The selected example demonstrates both — pick “Blank (start here)” for your own.")
                             Text("Run a prompt to trace the pipeline: variables → pre-hooks → final prompt → model output → post-hooks → final output.")
                                 .foregroundStyle(.tertiary)
                         }
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.dsBody).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ForEach(model.stages) { StageCard(stage: $0) }
                 }
-                .padding(16)
+                .padding(DS.Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minWidth: 380)
+            .frame(minWidth: DS.Size.panelMinWidth)
         }
         .playgroundBackground()
     }
 
     @ViewBuilder
-    private func field<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
-            content()
-        }
+    private func field<Content: View>(_ label: String, help: String? = nil,
+                                      @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        DSField(label: label, help: help, control: content)
     }
 
     /// A left-panel group divider so the required prompt block reads apart from optional pipeline steps.
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption).fontWeight(.semibold).kerning(0.5)
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
-    }
+    private func sectionHeader(_ title: String) -> some View { DSSectionHeader(title) }
 
     /// Compact read-only stand-in for the schema editor (now a sheet) — type name + field count.
     private var schemaSummary: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DS.Space.sm) {
             Image(systemName: "curlybraces").foregroundStyle(Theme.accent)
             Text(model.customSchema.typeName.isEmpty ? "Output" : model.customSchema.typeName)
                 .fontWeight(.medium)
             let n = model.customSchema.fields.count
             Text("· \(n) field\(n == 1 ? "" : "s")").foregroundStyle(.secondary)
         }
-        .font(.callout).fontWeight(.regular)
-        .padding(.vertical, 5).padding(.horizontal, 8)
+        .font(.dsBody)
+        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(radius: 8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
     }
 
     /// Compact read-only stand-in for the hooks editor (now a sheet) — counts + the unused-output ⚠︎
@@ -324,31 +311,31 @@ struct GlossView: View {
     private var hooksSummary: some View {
         let pre = model.hooks.pre.count
         let post = model.hooks.post.count
-        return HStack(spacing: 6) {
+        return HStack(spacing: DS.Space.sm) {
             Image(systemName: "wand.and.stars").foregroundStyle(Theme.accent)
             Text(pre + post == 0 ? "No hooks yet" : "\(pre) pre · \(post) post")
                 .fontWeight(.medium)
             if !model.unusedHookOutputs.isEmpty {
                 Spacer()
                 Label("unused output", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(Theme.gold)
+                    .font(.dsCaption).foregroundStyle(.dsWarning)
             }
         }
-        .font(.callout).fontWeight(.regular)
-        .padding(.vertical, 5).padding(.horizontal, 8)
+        .font(.dsBody)
+        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(radius: 8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
     }
 
     private func variableRow(key: String, value: Binding<String>) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DS.Space.sm) {
             Text("{{\(key)}}")
-                .font(.system(.caption, design: .monospaced).weight(.medium))
-                .foregroundStyle(Theme.accent)
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-            TextField("value", text: value).textFieldStyle(.roundedBorder)
+                .font(.dsCode)
+                .foregroundStyle(.dsAccent)
+                .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+            Image(systemName: "arrow.right").font(.dsMicro).foregroundStyle(.tertiary)
+            TextField("value", text: value).dsTextField()
         }
     }
 }
@@ -361,7 +348,7 @@ struct HooksEditorView: View {
     var unusedOutputs: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DS.Space.md) {
             hookList(title: "Pre-hooks · before the model", phase: .pre, list: $hooks.pre, defaultInput: "prompt")
             hookList(title: "Post-hooks · after the model", phase: .post, list: $hooks.post, defaultInput: "output")
         }
@@ -369,8 +356,8 @@ struct HooksEditorView: View {
 
     @ViewBuilder
     private func hookList(title: String, phase: HookPhase, list: Binding<[HookDef]>, defaultInput: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            Text(title).font(.dsLabel).foregroundStyle(.secondary)
             ForEach(list) { $hook in
                 HookRow(hook: $hook, phase: phase, unusedOutputs: unusedOutputs) { list.wrappedValue.removeAll { $0.id == hook.id } }
             }
@@ -379,7 +366,7 @@ struct HooksEditorView: View {
                     Button(op.displayName + op.phaseTag) { list.wrappedValue.append(HookDef(op: op, inputVar: defaultInput)) }
                 }
             } label: { Label("Add \(phase == .pre ? "pre" : "post")-hook", systemImage: "plus.circle") }
-                .font(.caption).menuStyle(.borderlessButton).fixedSize()
+                .font(.dsCaption).menuStyle(.borderlessButton).fixedSize()
         }
     }
 }
@@ -394,17 +381,17 @@ struct HooksEditorSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Hooks").font(.headline)
+                Text("Hooks").font(.dsTitle)
                 Spacer()
                 Button("Done") { isPresented = false }.keyboardShortcut(.defaultAction)
             }
-            .padding()
+            .padding(DS.Space.lg)
             Divider()
             ScrollView {
-                HooksEditorView(hooks: $hooks, unusedOutputs: unusedOutputs).padding(16)
+                HooksEditorView(hooks: $hooks, unusedOutputs: unusedOutputs).padding(DS.Space.xl)
             }
         }
-        .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 640)
+        .frame(minWidth: DS.Size.sheetMinWidth, idealWidth: 600, minHeight: 480, idealHeight: 640)
         .playgroundBackground()
     }
 }
@@ -437,8 +424,8 @@ private struct HookRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.sm) {
                 Toggle("", isOn: $hook.enabled).toggleStyle(.checkbox).labelsHidden()
                 Picker("", selection: op) {
                     ForEach(HookOp.choices(for: phase), id: \.self) { Text($0.displayName).tag($0) }
@@ -449,55 +436,51 @@ private struct HookRow: View {
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
             }
-            Text(hook.op.detail).font(.caption).foregroundStyle(.secondary)
+            Text(hook.op.detail).font(.dsCaption).foregroundStyle(.secondary)
 
-            HStack(spacing: 4) {
-                Text("in").font(.caption).foregroundStyle(.tertiary)
-                TextField("var", text: $hook.inputVar).textFieldStyle(.roundedBorder).frame(width: 84)
-                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
-                Text("out").font(.caption).foregroundStyle(.tertiary)
+            HStack(spacing: DS.Space.xs) {
+                Text("in").font(.dsCaption).foregroundStyle(.tertiary)
+                TextField("var", text: $hook.inputVar).dsTextField().frame(width: DS.Size.fieldMiniWidth)
+                Image(systemName: "arrow.right").font(.dsCaption).foregroundStyle(.tertiary)
+                Text("out").font(.dsCaption).foregroundStyle(.tertiary)
                 TextField("var", text: $hook.outputVar)
-                    .textFieldStyle(.roundedBorder).frame(width: 84)
+                    .dsTextField().frame(width: DS.Size.fieldMiniWidth)
                     .overlay {
                         if let c = outVarColor {
-                            RoundedRectangle(cornerRadius: 5).stroke(c, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(c, lineWidth: 1)
                         }
                     }
                 if outVarUnused {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(Theme.gold)
+                        .font(.dsMicro).foregroundStyle(.dsWarning)
                 }
             }
-            .font(.system(.caption, design: .monospaced))
+            .font(.dsCode)
 
             ForEach(hook.op.paramKeys, id: \.self) { p in
                 if p == .command {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
                         TextEditor(text: param(p))
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(minHeight: 56)
-                            .scrollContentBackground(.hidden)
-                            .padding(4)
-                            .glassCard(radius: 6)
-                        Text(p.placeholder).font(.caption).foregroundStyle(.tertiary)
+                            .font(.dsCode)
+                            .dsEditor(lines: 3)
+                        Text(p.placeholder).font(.dsCaption).foregroundStyle(.tertiary)
                     }
                 } else {
-                    HStack(spacing: 4) {
-                        Text(p.label).font(.caption).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
-                        TextField(p.placeholder, text: param(p)).textFieldStyle(.roundedBorder).font(.caption)
+                    HStack(spacing: DS.Space.xs) {
+                        Text(p.label).font(.dsCaption).foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
+                        TextField(p.placeholder, text: param(p)).dsTextField()
                     }
                 }
             }
         }
         .opacity(hook.enabled ? 1 : 0.5)
-        .padding(8)
-        .glassCard(radius: 8)
+        .dsCard()
     }
 
     private func portabilityBadge(_ p: Portability) -> some View {
         Text(p.label)
-            .font(.caption2)
-            .padding(.horizontal, 5).padding(.vertical, 2)
+            .font(.dsMicro)
+            .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
             .background((p.isPortable ? Theme.accent : Theme.gold).opacity(0.18), in: Capsule())
             .foregroundStyle(p.isPortable ? Theme.accent : Theme.gold)
     }
@@ -509,38 +492,37 @@ private struct StageCard: View {
     let stage: PlaygroundModel.PipelineStage
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            HStack(spacing: DS.Space.sm) {
                 statusGlyph
-                Text(stage.title).font(.subheadline).fontWeight(.medium)
+                Text(stage.title).font(.dsLabel)
                 Spacer()
                 if let ms = stage.ms {
-                    Text("\(ms) ms").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text("\(ms) ms").font(.dsCaption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
             if let note = stage.note, !note.isEmpty {
-                Text(note).font(.caption)
-                    .foregroundStyle(stage.status == .error ? .red : .secondary)
+                Text(note).font(.dsCaption)
+                    .foregroundStyle(stage.status == .error ? Color.dsDanger : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !stage.body.isEmpty {
                 Text(stage.body)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(.dsCode)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+                    .padding(DS.Space.sm)
                     .codeSurface()
             }
         }
-        .padding(10)
-        .glassCard(radius: 8, highlighted: stage.kind == .finalOutput)
+        .dsCard(raised: stage.kind == .finalOutput)
     }
 
     @ViewBuilder private var statusGlyph: some View {
         switch stage.status {
         case .running: ProgressView().controlSize(.small)
-        case .ok:      Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-        case .error:   Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(.caption)
+        case .ok:      Image(systemName: "checkmark.circle.fill").foregroundStyle(.dsSuccess).font(.dsCaption)
+        case .error:   Image(systemName: "xmark.circle.fill").foregroundStyle(.dsDanger).font(.dsCaption)
         }
     }
 }

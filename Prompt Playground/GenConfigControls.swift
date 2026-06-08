@@ -13,7 +13,7 @@ struct GenConfigControls: View {
     @Binding var config: GenConfig
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             Toggle("Greedy (deterministic)", isOn: greedy)
             Toggle(isOn: temperatureOn) {
                 HStack {
@@ -34,7 +34,7 @@ struct GenConfigControls: View {
                 Stepper("\(config.maximumResponseTokens ?? 512)", value: maxTokens, in: 64...4096, step: 64)
             }
         }
-        .font(.callout)
+        .font(.dsBody)
     }
 
     // GenConfig <-> toggle/value bindings.
