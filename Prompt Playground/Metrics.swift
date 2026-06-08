@@ -314,6 +314,8 @@ enum GoldenThresholds {
             if let two = s.meanSuggestionCountOK { checks.append(check("2 suggestions ≥ 0.95", two >= 0.95, String(format: "%.2f", two))) }
             if let d = s.meanDistinct { checks.append(check("Distinct ≥ 0.95", d >= 0.95, String(format: "%.2f", d))) }
             if let cl = s.contextLimitRate { checks.append(check("No context overflow", cl <= 0.0001, String(format: "%.2f", cl))) }
+        case .generic:
+            break   // no typed bundle — the universal decode/context/language checks above apply
         }
         if let r = s.meanManualRating { checks.append(check("Manual ≥ 4.0", r >= 4.0, String(format: "%.1f", r))) }
         if let j = s.meanJudge { checks.append(check("Judge ≥ 3.8", j >= 3.8, String(format: "%.1f", j))) }

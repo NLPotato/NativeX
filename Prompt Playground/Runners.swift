@@ -50,6 +50,11 @@ func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
         .replacingOccurrences(of: "{{ai}}", with: input.aiRole)
 }
 
+/// Generic lane: resolve every {{name}} against the full variable map (no fixed token set).
+func resolveGeneric(_ template: String, _ vars: [String: String]) -> String {
+    Vars.substitute(template, vars)
+}
+
 // MARK: - Gloss
 
 @MainActor
@@ -156,4 +161,39 @@ enum RoleplayRunner {
         return RunResultData(outputJSON: prettyJSON(turns[turns.count - 1]), turnsJSON: turnsJSON,
                              errorText: errorText, metrics: metrics)
     }
+}
+
+// MARK: - Generic (single-shot text run + hooks; the genericized Gloss tab's batch counterpart)
+
+@MainActor
+enum GenericRunner {
+    static func run(template: String, input: GenericInput, config: GenConfig,
+                    hooks: HookPipelineDef) async -> RunResultData {
+        var ctx = input.variables
+        ctx["input"] = input.input
+        _ = await HookEngine.runPre(hooks.pre, context: &ctx)
+        let resolvedInstructions = resolveGeneric(template, ctx)
+        let userPrompt = resolveGeneric(input.input, ctx)
+        let session = LanguageModelSession(instructions: resolvedInstructions)
+        let start = Date()
+        do {
+            let raw = try await session.respond(to: userPrompt, options: config.toOptions()).content
+            let (final, _) = await HookEngine.runPost(hooks.post, output: raw, context: ctx)
+            let latency = millis(since: start)
+            let contextTokens = TokenEstimator.estimate(session.transcript)
+            // Score the RAW model output (wrapped so the JSON-leaf language scorer has a string to read).
+            let metrics = GenericEvaluator.metrics(
+                json: jsonWrap(raw), decoded: true, latencyMs: latency,
+                resolvedPrompt: resolvedInstructions + "\n" + userPrompt,
+                expectedLanguage: ctx["learning"] ?? ctx["native"] ?? "", context: contextTokens)
+            return RunResultData(outputJSON: final, turnsJSON: nil, errorText: nil, metrics: metrics)
+        } catch {
+            let (type, text) = classify(error)
+            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
+                                 metrics: .failure(type, latencyMs: millis(since: start)))
+        }
+    }
+
+    /// Plain text has no JSON leaves to language-score; wrap it so GenericEvaluator can read one.
+    private static func jsonWrap(_ text: String) -> String { JSONCoder.encode(["output": text]) }
 }

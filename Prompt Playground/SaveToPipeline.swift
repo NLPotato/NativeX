@@ -27,6 +27,8 @@ struct SaveToPipelineSheet: View {
     /// When non-nil, the tab is in Custom-schema mode: offer to persist the schema + export Swift.
     var schemaDef: SchemaDef? = nil
     var liveConfig: GenConfig = GenConfig()
+    /// Pre/post hooks captured with the prompt so the Lab replays them (generic lane).
+    var hooks: HookPipelineDef = .empty
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -93,6 +95,10 @@ struct SaveToPipelineSheet: View {
                              ? "Enter a name."
                              : "Saves as “\(trimmedTemplateName) v\(nextVersion)” for the \(task.label) task.")
                             .font(.caption).foregroundStyle(.secondary)
+                        if !hooks.isEmpty {
+                            Text("Includes \(hooks.pre.count) pre + \(hooks.post.count) post hook\(hooks.pre.count + hooks.post.count == 1 ? "" : "s") — replayed in the Lab.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -188,7 +194,8 @@ struct SaveToPipelineSheet: View {
             let v = nextVersion
             context.insert(PromptTemplateModel(task: task, name: trimmedTemplateName, version: v,
                                                instructions: promptInstructions,
-                                               notes: "Captured from the playground.", genConfig: liveConfig))
+                                               notes: "Captured from the playground.",
+                                               genConfig: liveConfig, hooks: hooks))
             parts.append("template “\(trimmedTemplateName) v\(v)”")
         }
 

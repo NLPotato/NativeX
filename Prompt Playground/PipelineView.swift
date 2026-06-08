@@ -205,8 +205,7 @@ struct PipelineView: View {
         guard let template = selectedTemplate, let dataset = selectedDataset else { return }
         let cfg = config
         let def = selectedSchema?.def
-        let schemaID = selectedSchema.map { "dyn:\($0.id.uuidString)" }
-            ?? (task == .gloss ? "GlossResultGen" : "RoleplayTurnGen")
+        let schemaID = selectedSchema.map { "dyn:\($0.id.uuidString)" } ?? builtinSchemaID(for: task)
         Task {
             let exp = await runner.run(task: task, template: template, config: cfg,
                                        schemaID: schemaID, schemaDef: def, dataset: dataset, context: context)
@@ -217,6 +216,15 @@ struct PipelineView: View {
     private func syncSelections() {
         if selectedDataset == nil { selectedDatasetID = datasets.first?.id }
         if selectedTemplate == nil { selectedTemplateID = templates.first?.id }
+    }
+
+    /// Label stored when no dynamic schema is chosen (typed lanes name their @Generable; generic = text).
+    private func builtinSchemaID(for task: TaskKind) -> String {
+        switch task {
+        case .gloss:    return "GlossResultGen"
+        case .roleplay: return "RoleplayTurnGen"
+        case .generic:  return "Text"
+        }
     }
 
     @ViewBuilder

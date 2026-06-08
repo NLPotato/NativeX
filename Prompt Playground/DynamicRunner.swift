@@ -35,6 +35,36 @@ enum DynamicRunner {
         }
     }
 
+    /// Generic lane with a custom output schema: pre-hooks → resolve → dynamic respond → post-hooks.
+    /// Metrics are scored on the RAW model JSON; the stored output reflects any post-hook transform.
+    static func runGeneric(template: String, input: GenericInput, def: SchemaDef, config: GenConfig,
+                           hooks: HookPipelineDef) async -> RunResultData {
+        var ctx = input.variables
+        ctx["input"] = input.input
+        _ = await HookEngine.runPre(hooks.pre, context: &ctx)
+        let resolvedInstructions = resolveGeneric(template, ctx)
+        let userPrompt = resolveGeneric(input.input, ctx)
+        let session = LanguageModelSession(instructions: resolvedInstructions)
+        let start = Date()
+        do {
+            let content = try await DynamicRun.respond(session: session, prompt: userPrompt,
+                                                       def: def, options: config.toOptions())
+            let raw = prettyJSONString(content.jsonString)
+            let (final, _) = await HookEngine.runPost(hooks.post, output: raw, context: ctx)
+            let latency = millis(since: start)
+            let contextTokens = TokenEstimator.estimate(session.transcript)
+            let metrics = GenericEvaluator.metrics(
+                json: raw, decoded: true, latencyMs: latency,
+                resolvedPrompt: resolvedInstructions + "\n" + userPrompt,
+                expectedLanguage: ctx["native"] ?? ctx["learning"] ?? "", context: contextTokens)
+            return RunResultData(outputJSON: final, turnsJSON: nil, errorText: nil, metrics: metrics)
+        } catch {
+            let (type, text) = classify(error)
+            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
+                                 metrics: .failure(type, latencyMs: millis(since: start)))
+        }
+    }
+
     static func runRoleplay(template: String, input: RoleplayInput, def: SchemaDef, config: GenConfig) async -> RunResultData {
         let resolved = resolveRoleplay(template, input)
         let session = LanguageModelSession(instructions: resolved)

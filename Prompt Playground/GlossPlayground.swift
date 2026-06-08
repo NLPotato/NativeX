@@ -41,30 +41,49 @@ struct GlossResultGen: Codable, Equatable {
 }
 
 // MARK: - Preset registry
-// A preset is a named, editable instructions template. The gloss run flow itself lives in
-// GlossPipeline (shared by the single-shot tab and the headless Lab runner).
-// Placeholders: {{learning}} (sentence language), {{native}} (explanations), {{proficiency}}.
+// A preset is a named starting point for the GENERIC runner: an instructions template, a sample
+// input, an optional pre/post hook pipeline, and an optional output schema. The "Gloss" preset is
+// the canonical teaching example — it wires a Tokenize pre-hook (producing {{words}}) to a gloss
+// prompt and a structured output schema, so a new user sees hooks + guided generation working
+// together. Selecting a preset loads all four (instructions / input / hooks / schema).
 
 struct PromptPreset: Identifiable {
     let id: String
     let name: String
     let defaultInstructions: String
+    var defaultInput: String = ""
+    var hooks: HookPipelineDef = .empty
+    var useSchema: Bool = false
+    var schema: SchemaDef? = nil
 }
 
 let presets: [PromptPreset] = [
     PromptPreset(
         id: "gloss",
-        name: "Gloss",
+        name: "Gloss (example)",
         defaultInstructions: """
         You are a {{learning}} tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
-        You are given a {{learning}} sentence and, below it, a numbered list of selected words from it (only the \
-        words worth explaining for this learner — not every word). For EACH listed word, in the same order, output \
-        an entry containing the word copied exactly and its single best meaning IN THIS SENTENCE (not its most \
-        common dictionary meaning) as one short {{native}} gloss. Provide exactly one entry per listed word; do not \
-        add, remove, or reorder them. Also give a natural {{native}} translation of the WHOLE sentence. Keep meanings \
-        simple and literal for beginners; precise and idiomatic for advanced learners. If unsure, give your best guess.
-        """
-    )
+        Below is the {{learning}} sentence and a numbered list of its words. For EACH listed word, in the same \
+        order, give its single best meaning IN THIS SENTENCE (not its most common dictionary meaning) as one short \
+        {{native}} gloss. Also give a natural {{native}} translation of the WHOLE sentence.
+
+        Words:
+        {{words}}
+        """,
+        defaultInput: "Der Hund schläft.",
+        hooks: HookPipelineDef(pre: [
+            HookDef(op: .tokenizeWords, inputVar: "input", outputVar: "words",
+                    params: ["language": "{{learning}}", "format": "numbered"])
+        ]),
+        useSchema: true,
+        schema: .glossLike
+    ),
+    PromptPreset(
+        id: "blank",
+        name: "Blank",
+        defaultInstructions: "You are a helpful assistant.",
+        defaultInput: ""
+    ),
 ]
 
 // MARK: - Gloss pipeline (shared by the single-shot tab + the headless Lab runner)
@@ -193,51 +212,74 @@ enum GlossPipeline {
 @MainActor
 @Observable
 final class PlaygroundModel {
-    var sentence: String = "Der Hund schläft."
-    /// Values for the `{{name}}` placeholders in `instructions`, keyed by variable name.
-    /// Seeded with the gloss preset's source/target languages.
+    /// The user message sent to the model. May itself contain `{{name}}` placeholders, and is
+    /// exposed to pre-hooks as the `input` context key (e.g. a Tokenize hook reads it).
+    var input: String = "Der Hund schläft."
+    /// Values for the `{{name}}` placeholders in `instructions`/`input`, keyed by variable name.
     var variableValues: [String: String] = ["learning": "German", "native": "English", "proficiency": "intermediate"]
     var selectedPresetID: String
     var instructions: String
 
-    // Surfaced in the output pane after a run.
-    var resolvedInstructions: String = ""
-    var userPrompt: String = ""
-    var output: String = ""
+    /// Pre/post native-API hooks that run around the model call.
+    var hooks: HookPipelineDef = .empty
+
+    // Run results.
+    var output: String = ""        // final output (after post-hooks)
     var errorText: String?
     var isRunning: Bool = false
     var elapsed: Double?
+    /// The pipeline as ordered stages, updated live as a run proceeds (drives the right panel).
+    var stages: [PipelineStage] = []
 
-    // Generation config (additive: was Pipeline-only) + the dynamic-schema prototyping lane.
+    // Generation config + the dynamic-schema prototyping lane.
     var config = GenConfig()
     var useCustomSchema = false
     var customSchema: SchemaDef = .glossLike
+
+    /// One step of the run, shown as a card in the output pane.
+    struct PipelineStage: Identifiable {
+        enum Kind { case variables, preHook, prompt, model, postHook, finalOutput }
+        enum Status { case running, ok, error }
+        let id = UUID()
+        let kind: Kind
+        var title: String
+        var status: Status
+        var body: String = ""
+        var ms: Int? = nil
+        var note: String? = nil
+    }
 
     init() {
         let first = presets[0]
         selectedPresetID = first.id
         instructions = first.defaultInstructions
+        input = first.defaultInput
+        hooks = first.hooks
+        useCustomSchema = first.useSchema
+        customSchema = first.schema ?? .glossLike
     }
 
     var selectedPreset: PromptPreset {
         presets.first { $0.id == selectedPresetID } ?? presets[0]
     }
 
-    /// `{{name}}` with optional inner whitespace; the capture group is the trimmed variable name.
-    /// One source of truth for both key detection and run-time substitution so they can't drift.
-    static let variablePattern = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/
+    /// `{{name}}` matcher — the one shared `Vars` pattern, so detection and substitution can't drift.
+    static let variablePattern = Vars.pattern
 
-    /// Variable names referenced as `{{name}}` in `instructions`, in first-appearance order, deduped.
-    /// Inner whitespace is trimmed, so `{{native}}`, `{{native }}`, and `{{ native }}` are one variable.
+    /// User-editable variables: every `{{name}}` in instructions or input that ISN'T produced by a
+    /// hook (hook outputs are computed and shown in the pipeline, not entered here). First-appearance
+    /// order, deduped; inner whitespace trimmed so `{{native}}` and `{{ native }}` are one variable.
     var variableKeys: [String] {
-        var seen = Set<String>()
-        var keys: [String] = []
-        for match in instructions.matches(of: Self.variablePattern) {
-            let key = String(match.1)
+        let produced = hooks.producedVars
+        var seen = Set<String>(), keys: [String] = []
+        for key in Vars.keys(in: instructions) + Vars.keys(in: input) where !produced.contains(key) {
             if seen.insert(key).inserted { keys.append(key) }
         }
         return keys
     }
+
+    /// Variables produced by enabled hooks — shown as info in the Variables card, not editable.
+    var hookOutputs: Set<String> { hooks.producedVars }
 
     /// `{{…}}` fragments whose contents aren't a clean variable name (letters/digits/underscore).
     /// Surfaced as a warning so malformed tokens like `{{na me}}` or `{{}}` aren't dropped silently.
@@ -252,16 +294,34 @@ final class PlaygroundModel {
         return bad
     }
 
-    /// Read accessors for the gloss task's language mapping (used when saving a dataset example).
-    /// Canonical keys are learning/native; legacy source/target still accepted.
-    var source: String { variableValues["learning"] ?? variableValues["source"] ?? "" }
-    var target: String { variableValues["native"] ?? variableValues["target"] ?? "" }
-
-    /// Reset the editable instructions to the chosen preset's default template.
-    func loadPresetDefaults(for id: String) {
-        if let p = presets.first(where: { $0.id == id }) {
-            instructions = p.defaultInstructions
+    /// Enabled pre-hooks whose `outputVar` is consumed nowhere — not by an instructions/input
+    /// `{{token}}`, not by a later hook's input var, and not by any hook's params. That output is
+    /// dead weight and, far more often, a typo of the `{{token}}` the prompt actually expects — so
+    /// it's flagged before a run wastes a model call producing a silently-empty variable. Post-hook
+    /// outputs are terminal (they feed the final output, not a `{{token}}`), so they're excluded.
+    var unusedHookOutputs: [String] {
+        let produced = hooks.pre.filter { $0.enabled && !$0.outputVar.isEmpty }
+        guard !produced.isEmpty else { return [] }
+        var consumed = Set(Vars.keys(in: instructions) + Vars.keys(in: input))
+        for hook in hooks.pre + hooks.post where hook.enabled {
+            consumed.insert(hook.inputVar)
+            for value in hook.params.values { consumed.formUnion(Vars.keys(in: value)) }
         }
+        var seen = Set<String>(), unused: [String] = []
+        for hook in produced where !consumed.contains(hook.outputVar) {
+            if seen.insert(hook.outputVar).inserted { unused.append(hook.outputVar) }
+        }
+        return unused
+    }
+
+    /// Load the chosen preset's instructions, sample input, hook pipeline, and output schema.
+    func loadPresetDefaults(for id: String) {
+        guard let p = presets.first(where: { $0.id == id }) else { return }
+        instructions = p.defaultInstructions
+        input = p.defaultInput
+        hooks = p.hooks
+        useCustomSchema = p.useSchema
+        if let s = p.schema { customSchema = s }
     }
 
     var isModelAvailable: Bool {
@@ -288,43 +348,119 @@ final class PlaygroundModel {
         }
     }
 
+    /// Generic pipeline: variables → pre-hooks → final prompt → model (schema or text) → post-hooks.
+    /// Stages are appended/updated on the MainActor between awaits so the right panel animates live.
     func run() async {
         guard !isRunning else { return }
         errorText = nil
         output = ""
-        resolvedInstructions = ""
-        userPrompt = ""
         elapsed = nil
+        stages = []
         isRunning = true
         defer { isRunning = false }
+        let overallStart = Date()
 
-        let resolved = instructions.replacing(Self.variablePattern) { match in
-            variableValues[String(match.1)] ?? ""
+        // 1) Variables — seed the run context (user values + the raw input under `input`).
+        var ctx = variableValues
+        ctx["input"] = input
+        stages.append(PipelineStage(kind: .variables, title: "Variables", status: .ok,
+                                    body: contextPreview(ctx, keys: variableKeys + ["input"])))
+
+        // 2) Pre-hooks — one at a time so the panel shows progress; each chains off the last.
+        for hook in hooks.pre where hook.enabled {
+            stages.append(PipelineStage(kind: .preHook, title: "Pre · \(hook.op.displayName)", status: .running))
+            let i = stages.count - 1
+            await Task.yield()
+            let step = await HookEngine.runOne(hook, context: &ctx)
+            stages[i].status = step.error == nil ? .ok : .error
+            stages[i].ms = step.ms
+            stages[i].note = note(for: step, outputVar: hook.outputVar)
+            stages[i].body = step.error == nil
+                ? (hook.outputVar.isEmpty ? (step.output ?? "") : "{{\(hook.outputVar)}} =\n\(step.output ?? "")")
+                : ""
         }
-        resolvedInstructions = resolved
 
-        // Fresh session per run so a prior run never biases the next (clean A/B testing).
-        let start = Date()
+        // 3) Final prompt — a single substitution pass against the merged context.
+        let resolvedInstructions = Vars.substitute(instructions, ctx)
+        let userPrompt = Vars.substitute(input, ctx)
+        stages.append(PipelineStage(
+            kind: .prompt, title: "Final prompt", status: .ok,
+            body: "INSTRUCTIONS\n\(resolvedInstructions)\n\nUSER MESSAGE\n\(userPrompt)",
+            note: useCustomSchema ? "Output schema injected (includeSchemaInPrompt: true)" : "No schema — free-text output"))
+
+        // 4) Model — fresh session per run so a prior run never biases the next (clean A/B testing).
+        stages.append(PipelineStage(kind: .model, title: "Model output", status: .running))
+        let mi = stages.count - 1
+        await Task.yield()
+        let modelStart = Date()
+        var rawOutput = ""
         do {
+            let session = LanguageModelSession(instructions: resolvedInstructions)
             if useCustomSchema {
-                let session = LanguageModelSession(instructions: resolved)
-                let prompt = "Sentence: \(sentence)"
-                userPrompt = prompt
-                let content = try await DynamicRun.respond(session: session, prompt: prompt,
+                let content = try await DynamicRun.respond(session: session, prompt: userPrompt,
                                                            def: customSchema, options: config.toOptions())
-                output = prettyJSONString(content.jsonString)
+                rawOutput = prettyJSONString(content.jsonString)
             } else {
-                let prof = Proficiency(label: variableValues["proficiency"] ?? "")
-                let out = try await GlossPipeline.run(sentence: sentence, learning: source,
-                                                      proficiency: prof, instructions: resolved, config: config)
-                userPrompt = out.promptSent
-                output = prettyJSON(out.result)
+                rawOutput = try await session.respond(to: userPrompt, options: config.toOptions()).content
             }
+            stages[mi].status = .ok
+            stages[mi].ms = millis(since: modelStart)
+            stages[mi].body = rawOutput
+            stages[mi].note = useCustomSchema ? "Conforms to the output schema (constrained decoding)" : nil
         } catch let e as SchemaWalker.ValidationError {
-            errorText = "Schema error: \(e.localizedDescription)"
+            failModel(at: mi, "Schema error: \(e.localizedDescription)", since: modelStart, overall: overallStart)
+            return
         } catch {
-            errorText = "Generation failed: \(error.localizedDescription)"
+            failModel(at: mi, "Generation failed: \(error.localizedDescription)", since: modelStart, overall: overallStart)
+            return
         }
-        elapsed = Date().timeIntervalSince(start)
+
+        // 5) Post-hooks — thread the output through, live. Final output = last result (else model output).
+        var finalOut = rawOutput
+        var postCtx = ctx
+        postCtx["output"] = rawOutput
+        let hasPost = hooks.post.contains { $0.enabled }
+        for hook in hooks.post where hook.enabled {
+            stages.append(PipelineStage(kind: .postHook, title: "Post · \(hook.op.displayName)", status: .running))
+            let i = stages.count - 1
+            await Task.yield()
+            let step = await HookEngine.runOne(hook, context: &postCtx, defaultInput: finalOut)
+            if let o = step.output { finalOut = o; postCtx["output"] = o }
+            stages[i].status = step.error == nil ? .ok : .error
+            stages[i].ms = step.ms
+            stages[i].note = note(for: step, outputVar: hook.outputVar, terminal: true)
+            stages[i].body = step.error == nil ? (step.output ?? "") : ""
+        }
+
+        output = finalOut
+        if hasPost {   // distinct final card only when a post-hook actually transformed the output
+            stages.append(PipelineStage(kind: .finalOutput, title: "Final output", status: .ok, body: finalOut))
+        }
+        elapsed = Date().timeIntervalSince(overallStart)
+    }
+
+    /// A finished hook's stage note: its error if it failed, else a warning when it *succeeded* but
+    /// produced empty output — so a downstream `{{var}}` (or, for a terminal post-hook, the final
+    /// output) silently going blank is visible rather than mistaken for a real result.
+    private func note(for step: HookStep, outputVar: String, terminal: Bool = false) -> String? {
+        if let error = step.error { return error }
+        guard (step.output ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        if terminal { return "⚠︎ Produced empty output — the final output is now blank." }
+        return outputVar.isEmpty ? nil : "⚠︎ Produced empty output — {{\(outputVar)}} resolves to blank."
+    }
+
+    private func failModel(at index: Int, _ message: String, since modelStart: Date, overall: Date) {
+        errorText = message
+        stages[index].status = .error
+        stages[index].ms = millis(since: modelStart)
+        stages[index].note = message
+        elapsed = Date().timeIntervalSince(overall)
+    }
+
+    /// "{{key}} = value" lines for the given keys present in the context (the Variables stage body).
+    private func contextPreview(_ ctx: [String: String], keys: [String]) -> String {
+        let shown = keys.filter { ctx[$0]?.isEmpty == false }
+        guard !shown.isEmpty else { return "—" }
+        return shown.map { "{{\($0)}} = \(ctx[$0] ?? "")" }.joined(separator: "\n")
     }
 }

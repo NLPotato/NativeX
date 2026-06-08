@@ -175,6 +175,11 @@ struct DatasetsView: View {
         case .roleplay:
             guard let r = ex.roleplayInput else { return "—" }
             return "\(r.situation)  ·  you: \(r.youRole) / ai: \(r.aiRole)  ·  \(r.learning)"
+        case .generic:
+            guard let g = ex.genericInput else { return "—" }
+            let vars = g.variables.isEmpty ? "" :
+                "  ·  " + g.variables.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+            return g.input + vars
         }
     }
 
@@ -203,7 +208,12 @@ struct DatasetsView: View {
     // MARK: Bits
 
     private func taskBadge(_ task: TaskKind) -> some View {
-        let color: Color = task == .gloss ? Theme.accent : Theme.cyan
+        let color: Color
+        switch task {
+        case .gloss:    color = Theme.accent
+        case .roleplay: color = Theme.cyan
+        case .generic:  color = Theme.gold
+        }
         return Text(task.label)
             .font(.caption2).fontWeight(.medium)
             .padding(.horizontal, 7).padding(.vertical, 2)
@@ -296,8 +306,12 @@ struct ExampleEditorSheet: View {
     @State private var aiRole = ""
     @State private var turns: [TurnDraft] = []
     @State private var maxTurns = 4
+    // generic
+    @State private var genInput = ""
+    @State private var genVars: [VarDraft] = []
 
     private struct TurnDraft: Identifiable { let id = UUID(); var text: String }
+    private struct VarDraft: Identifiable { let id = UUID(); var key: String; var value: String }
 
     private var task: TaskKind {
         switch target {
@@ -314,6 +328,8 @@ struct ExampleEditorSheet: View {
             return ![sentence, learning, native].contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         case .roleplay:
             return ![learning, native, situation, youRole, aiRole].contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        case .generic:
+            return !genInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -333,6 +349,7 @@ struct ExampleEditorSheet: View {
                 switch task {
                 case .gloss: glossFields
                 case .roleplay: roleplayFields
+                case .generic: genericFields
                 }
             }
             .formStyle(.grouped)
@@ -348,7 +365,7 @@ struct ExampleEditorSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 520, height: task == .roleplay ? 640 : 440)
+        .frame(width: 520, height: task == .gloss ? 440 : 640)
         .onAppear(perform: load)
     }
 
@@ -389,6 +406,30 @@ struct ExampleEditorSheet: View {
         }
     }
 
+    @ViewBuilder private var genericFields: some View {
+        Section("Input") {
+            TextField("User message sent to the model", text: $genInput, axis: .vertical).lineLimit(1...5)
+        }
+        Section("Variables") {
+            if genVars.isEmpty {
+                Text("No variables. Add the {{name}} values this prompt's instructions or pre-hooks expect.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach($genVars) { $v in
+                HStack(spacing: 6) {
+                    TextField("name", text: $v.key).frame(width: 120)
+                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                    TextField("value", text: $v.value)
+                    Button(role: .destructive) { genVars.removeAll { $0.id == v.id } } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Button { genVars.append(VarDraft(key: "", value: "")) } label: { Label("Add variable", systemImage: "plus") }
+        }
+    }
+
     private func load() {
         guard case .edit(let e) = target else { return }
         label = e.label
@@ -400,6 +441,11 @@ struct ExampleEditorSheet: View {
                 learning = r.learning; native = r.native; situation = r.situation
                 youRole = r.youRole; aiRole = r.aiRole; maxTurns = r.maxTurns
                 turns = r.scriptedUserTurns.map { TurnDraft(text: $0) }
+            }
+        case .generic:
+            if let g = e.genericInput {
+                genInput = g.input
+                genVars = g.variables.map { VarDraft(key: $0.key, value: $0.value) }.sorted { $0.key < $1.key }
             }
         }
     }
@@ -416,6 +462,10 @@ struct ExampleEditorSheet: View {
             json = JSONCoder.encode(RoleplayInput(learning: learning, native: native, situation: situation,
                                                   youRole: youRole, aiRole: aiRole,
                                                   scriptedUserTurns: scripted, maxTurns: maxTurns))
+        case .generic:
+            let vars = Dictionary(genVars.map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) }
+                                        .filter { !$0.0.isEmpty }, uniquingKeysWith: { _, b in b })
+            json = JSONCoder.encode(GenericInput(input: genInput, variables: vars))
         }
         switch target {
         case .new(let d):

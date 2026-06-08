@@ -96,7 +96,7 @@ extension SchemaDef {
         ])
     }
 
-    static func starter(for task: TaskKind) -> SchemaDef { task == .gloss ? .glossLike : .roleplayLike }
+    static func starter(for task: TaskKind) -> SchemaDef { task == .roleplay ? .roleplayLike : .glossLike }
 }
 
 // MARK: - Shared traversal (used by SchemaBuilder + SwiftCodegen so they never diverge)

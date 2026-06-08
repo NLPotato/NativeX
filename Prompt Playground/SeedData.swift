@@ -21,6 +21,17 @@ enum SeedData {
     add one or two short grammar notes in {{native}}. Only analyze words that actually appear; do not invent words.
     """
 
+    /// Generic-lane demo: the {{words}} list is produced by a Tokenize pre-hook, not the model.
+    static let genericGlossTemplate = """
+    You are a {{learning}} tutor; the learner's native language is {{native}}. Learner level: {{proficiency}}.
+    Below is the {{learning}} sentence and a numbered list of its words. For EACH listed word, in order, give its \
+    single best meaning IN THIS SENTENCE as one short {{native}} gloss. Then give a natural {{native}} translation \
+    of the whole sentence.
+
+    Words:
+    {{words}}
+    """
+
     static func seedIfNeeded(_ context: ModelContext) {
         let count = (try? context.fetchCount(FetchDescriptor<PromptTemplateModel>())) ?? 0
         guard count == 0 else { return }
@@ -28,8 +39,16 @@ enum SeedData {
             instructions: glossTemplate, notes: "Canonical {{learning}}/{{native}} gloss prompt."))
         context.insert(PromptTemplateModel(task: .roleplay, name: "Role-play baseline", version: 1,
             instructions: RoleplayModel.defaultInstructions, notes: "Mirrors wiekant's role-play scaffold."))
+        context.insert(PromptTemplateModel(task: .generic, name: "Gloss (hooks demo)", version: 1,
+            instructions: genericGlossTemplate,
+            notes: "Generic lane: a Tokenize pre-hook feeds {{words}} into the prompt.",
+            hooks: HookPipelineDef(pre: [
+                HookDef(op: .tokenizeWords, inputVar: "input", outputVar: "words",
+                        params: ["language": "{{learning}}", "format": "numbered"])
+            ])))
         context.insert(glossDataset())
         context.insert(roleplayDataset())
+        context.insert(genericDataset())
         try? context.save()
     }
 
@@ -49,6 +68,23 @@ enum SeedData {
             glossExample("ES · polite request", "Me gustaría pedir un café, por favor.", learning: "Spanish"),
             glossExample("FR · directions", "Où est la gare la plus proche ?", learning: "French"),
             glossExample("JA · please give", "コーヒーを一杯ください。", learning: "Japanese"),
+        ])
+    }
+
+    // MARK: Generic
+
+    private static func genericExample(_ label: String, _ sentence: String, learning: String,
+                                       native: String = "English", proficiency: String = "intermediate") -> ExampleModel {
+        let input = GenericInput(input: sentence,
+                                 variables: ["learning": learning, "native": native, "proficiency": proficiency])
+        return ExampleModel(task: .generic, label: label, inputJSON: JSONCoder.encode(input))
+    }
+
+    private static func genericDataset() -> DatasetModel {
+        DatasetModel(task: .generic, name: "Starter generic", examples: [
+            genericExample("DE · simple", "Der Hund schläft.", learning: "German"),
+            genericExample("ES · café order", "Me gustaría pedir un café, por favor.", learning: "Spanish"),
+            genericExample("FR · directions", "Où est la gare la plus proche ?", learning: "French"),
         ])
     }
 

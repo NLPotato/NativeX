@@ -18,9 +18,37 @@ import SQLite3
 // MARK: - Task kind
 
 enum TaskKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case gloss, roleplay
+    case gloss, roleplay, generic
     var id: String { rawValue }
-    var label: String { self == .gloss ? "Gloss" : "Role-play" }
+    var label: String {
+        switch self {
+        case .gloss:    return "Gloss"
+        case .roleplay: return "Role-play"
+        case .generic:  return "Run"
+        }
+    }
+}
+
+// MARK: - Variable substitution (one source of truth for {{name}} placeholders)
+// Shared by the live tab engine, the headless runners, and the hook engine so detection and
+// substitution can never drift. A name is letters/digits/underscore; inner whitespace is trimmed.
+
+enum Vars {
+    static let pattern = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/
+
+    /// Replace every `{{name}}` with `values[name]`, or "" when the name is unbound.
+    static func substitute(_ template: String, _ values: [String: String]) -> String {
+        template.replacing(pattern) { values[String($0.1)] ?? "" }
+    }
+
+    /// Variable names referenced in `template`, in first-appearance order, deduped.
+    static func keys(in template: String) -> [String] {
+        var seen = Set<String>(), keys: [String] = []
+        for m in template.matches(of: pattern) where seen.insert(String(m.1)).inserted {
+            keys.append(String(m.1))
+        }
+        return keys
+    }
 }
 
 // MARK: - Proficiency

@@ -37,11 +37,12 @@ final class ExperimentRunner {
         let examples = dataset.examples.sorted { $0.createdAt < $1.createdAt }
         total = examples.count
 
+        let hooks = template.hooks
         let experiment = ExperimentModel(
             task: task, label: "\(template.name) v\(template.version) · \(dataset.name)",
             templateName: template.name, templateVersion: template.version,
             instructions: template.instructions, schemaID: schemaID, genConfig: config,
-            datasetName: dataset.name)
+            datasetName: dataset.name, hooks: hooks)
         context.insert(experiment)
 
         for example in examples {
@@ -56,12 +57,18 @@ final class ExperimentRunner {
             case (.roleplay, nil):
                 guard let input = example.roleplayInput else { completed += 1; continue }
                 result = await RoleplayRunner.run(template: template.instructions, input: input, config: config)
+            case (.generic, nil):
+                guard let input = example.genericInput else { completed += 1; continue }
+                result = await GenericRunner.run(template: template.instructions, input: input, config: config, hooks: hooks)
             case (.gloss, let def?):
                 guard let input = example.glossInput else { completed += 1; continue }
                 result = await DynamicRunner.runGloss(template: template.instructions, input: input, def: def, config: config)
             case (.roleplay, let def?):
                 guard let input = example.roleplayInput else { completed += 1; continue }
                 result = await DynamicRunner.runRoleplay(template: template.instructions, input: input, def: def, config: config)
+            case (.generic, let def?):
+                guard let input = example.genericInput else { completed += 1; continue }
+                result = await DynamicRunner.runGeneric(template: template.instructions, input: input, def: def, config: config, hooks: hooks)
             }
 
             let run = RunModel(exampleLabel: example.label, inputJSON: example.inputJSON,

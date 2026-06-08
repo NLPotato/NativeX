@@ -32,6 +32,13 @@ struct RoleplayInput: Codable, Equatable, Sendable {
     var maxTurns: Int
 }
 
+/// Generic-lane example: a free user message plus the `{{name}}` variable bindings the prompt and
+/// any pre-hooks consume. The home for hook-driven, schema-or-text runs authored in the Gloss tab.
+struct GenericInput: Codable, Equatable, Sendable {
+    var input: String
+    var variables: [String: String]
+}
+
 enum JSONCoder {
     static func encode<T: Encodable>(_ value: T) -> String {
         guard let data = try? JSONEncoder().encode(value),
@@ -56,12 +63,14 @@ final class PromptTemplateModel {
     var instructions: String
     var notes: String
     var genConfigJSON: String = "{}"     // GenConfig captured at save time (seeds pipeline runs)
+    var hooksJSON: String = "{}"         // HookPipelineDef captured at save time (replayed in the Lab)
 
     var task: TaskKind { TaskKind(rawValue: taskRaw) ?? .gloss }
     var genConfig: GenConfig { JSONCoder.decode(GenConfig.self, genConfigJSON) ?? GenConfig() }
+    var hooks: HookPipelineDef { JSONCoder.decode(HookPipelineDef.self, hooksJSON) ?? .empty }
 
     init(task: TaskKind, name: String, version: Int = 1, instructions: String, notes: String = "",
-         genConfig: GenConfig = GenConfig()) {
+         genConfig: GenConfig = GenConfig(), hooks: HookPipelineDef = .empty) {
         self.id = UUID()
         self.createdAt = Date()
         self.taskRaw = task.rawValue
@@ -70,6 +79,7 @@ final class PromptTemplateModel {
         self.instructions = instructions
         self.notes = notes
         self.genConfigJSON = JSONCoder.encode(genConfig)
+        self.hooksJSON = JSONCoder.encode(hooks)
     }
 }
 
@@ -137,6 +147,7 @@ final class ExampleModel {
     var task: TaskKind { TaskKind(rawValue: taskRaw) ?? .gloss }
     var glossInput: GlossInput? { JSONCoder.decode(GlossInput.self, inputJSON) }
     var roleplayInput: RoleplayInput? { JSONCoder.decode(RoleplayInput.self, inputJSON) }
+    var genericInput: GenericInput? { JSONCoder.decode(GenericInput.self, inputJSON) }
 
     init(task: TaskKind, label: String, inputJSON: String) {
         self.id = UUID()
@@ -160,6 +171,7 @@ final class ExperimentModel {
     var instructions: String       // raw template used (with {{vars}})
     var schemaID: String           // which @Generable schema (e.g. "GlossResultGen")
     var genConfigJSON: String      // GenConfig, encoded
+    var hooksJSON: String = "{}"   // HookPipelineDef snapshot — which hooks produced this experiment
     var datasetName: String
     var status: String             // "running" | "done" | "cancelled"
     @Relationship(deleteRule: .cascade, inverse: \RunModel.experiment)
@@ -167,10 +179,12 @@ final class ExperimentModel {
 
     var task: TaskKind { TaskKind(rawValue: taskRaw) ?? .gloss }
     var genConfig: GenConfig { JSONCoder.decode(GenConfig.self, genConfigJSON) ?? GenConfig() }
+    var hooks: HookPipelineDef { JSONCoder.decode(HookPipelineDef.self, hooksJSON) ?? .empty }
     var variantLabel: String { "\(templateName) v\(templateVersion) · \(genConfig.label)" }
 
     init(task: TaskKind, label: String, templateName: String, templateVersion: Int,
-         instructions: String, schemaID: String, genConfig: GenConfig, datasetName: String) {
+         instructions: String, schemaID: String, genConfig: GenConfig, datasetName: String,
+         hooks: HookPipelineDef = .empty) {
         self.id = UUID()
         self.createdAt = Date()
         self.taskRaw = task.rawValue
@@ -180,6 +194,7 @@ final class ExperimentModel {
         self.instructions = instructions
         self.schemaID = schemaID
         self.genConfigJSON = JSONCoder.encode(genConfig)
+        self.hooksJSON = JSONCoder.encode(hooks)
         self.datasetName = datasetName
         self.status = "running"
         self.runs = []
