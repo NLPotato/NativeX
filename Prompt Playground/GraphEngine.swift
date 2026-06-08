@@ -93,6 +93,15 @@ final class GraphEngine {
 
     func deleteEdge(_ id: UUID) { graph.edges.removeAll { $0.id == id } }
 
+    /// Remove the edge feeding a given input port (double-click an input port dot to unwire).
+    func disconnect(to id: UUID, port: String) {
+        graph.edges.removeAll { $0.toNodeID == id && $0.inputPort == port }
+    }
+
+    func isConnected(_ id: UUID, port: String) -> Bool {
+        graph.edges.contains { $0.toNodeID == id && $0.inputPort == port }
+    }
+
     // MARK: Run
 
     func run() async {

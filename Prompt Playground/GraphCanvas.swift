@@ -187,9 +187,11 @@ private struct NodeCardView: View {
     // Port dots positioned at the analytic anchors (in node-local coordinates).
     private var portDots: some View {
         ZStack(alignment: .topLeading) {
-            ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, _ in
-                portDot(filled: false)
+            ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, port in
+                portDot(filled: engine.isConnected(node.id, port: port))
                     .position(x: 0, y: NodeMetrics.rowCenterY(i))
+                    .onTapGesture(count: 2) { engine.disconnect(to: node.id, port: port) }
+                    .help("Double-click to disconnect")
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
                 portDot(filled: true)
