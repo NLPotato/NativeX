@@ -10,6 +10,8 @@ struct ContentView: View {
                 .tabItem { Label("Single-shot", systemImage: "bolt") }
             ChatView()
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
+            GraphView()
+                .tabItem { Label("Graph", systemImage: "point.3.connected.trianglepath.dotted") }
             DatasetsView()
                 .tabItem { Label("Datasets", systemImage: "tablecells") }
             PipelineView()   // "Lab" tab; type/file kept as Pipeline* (see CLAUDE.md naming note)

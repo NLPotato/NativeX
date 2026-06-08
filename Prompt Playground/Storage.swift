@@ -279,11 +279,34 @@ final class RunModel {
     }
 }
 
+// MARK: - Node graphs (the visual ComfyUI/FigJam-style canvas; whole GraphDef as one JSON blob)
+
+@Model
+final class GraphModel {
+    var id: UUID
+    var createdAt: Date
+    var name: String
+    var version: Int = 1
+    var notes: String = ""
+    var graphJSON: String = "{}"          // GraphDef, encoded — every field defaulted for lightweight migration
+
+    var graphDef: GraphDef { JSONCoder.decode(GraphDef.self, graphJSON) ?? GraphDef() }
+
+    init(name: String, graph: GraphDef = GraphDef(), version: Int = 1, notes: String = "") {
+        self.id = UUID()
+        self.createdAt = Date()
+        self.name = name
+        self.version = version
+        self.notes = notes
+        self.graphJSON = JSONCoder.encode(graph)
+    }
+}
+
 // MARK: - Container
 
 enum PlaygroundStore {
     static let models: [any PersistentModel.Type] = [
         PromptTemplateModel.self, SchemaModel.self, DatasetModel.self, ExampleModel.self,
-        ExperimentModel.self, RunModel.self
+        ExperimentModel.self, RunModel.self, GraphModel.self
     ]
 }

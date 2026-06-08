@@ -33,6 +33,7 @@ enum SeedData {
     """
 
     static func seedIfNeeded(_ context: ModelContext) {
+        seedGraphsIfNeeded(context)   // independent guard — GraphModel is new, so existing stores get these too
         let count = (try? context.fetchCount(FetchDescriptor<PromptTemplateModel>())) ?? 0
         guard count == 0 else { return }
         context.insert(PromptTemplateModel(task: .gloss, name: "Gloss baseline", version: 1,
@@ -49,6 +50,16 @@ enum SeedData {
         context.insert(glossDataset())
         context.insert(roleplayDataset())
         context.insert(genericDataset())
+        try? context.save()
+    }
+
+    /// Seed starter node-graphs once (independent of the prompt/dataset seed, since GraphModel is new
+    /// and an existing store already has templates — so its guard would otherwise skip these).
+    static func seedGraphsIfNeeded(_ context: ModelContext) {
+        let count = (try? context.fetchCount(FetchDescriptor<GraphModel>())) ?? 0
+        guard count == 0 else { return }
+        context.insert(GraphModel(name: "Gloss graph", graph: GraphEngine.exampleGloss()))
+        context.insert(GraphModel(name: "Chat (multi-turn)", graph: GraphEngine.exampleChat()))
         try? context.save()
     }
 
