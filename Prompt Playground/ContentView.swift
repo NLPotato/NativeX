@@ -10,6 +10,8 @@ struct ContentView: View {
                 .tabItem { Label("Gloss", systemImage: "text.book.closed") }
             RoleplayView()
                 .tabItem { Label("Role-play", systemImage: "bubble.left.and.bubble.right") }
+            DatasetsView()
+                .tabItem { Label("Datasets", systemImage: "tablecells") }
             PipelineView()   // "Lab" tab; type/file kept as Pipeline* (see CLAUDE.md naming note)
                 .tabItem { Label("Lab", systemImage: "chart.bar.doc.horizontal") }
         }
@@ -87,33 +89,46 @@ struct GlossView: View {
                         TextField("Sentence to analyze", text: $model.sentence, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
                             .lineLimit(1...4)
+                            .frame(minHeight: 56)
                     }
 
-                    HStack(alignment: .top, spacing: 10) {
-                        field("Source language") {
-                            TextField("e.g. German", text: $model.source)
-                                .textFieldStyle(.roundedBorder)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Variables").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                        VStack(spacing: 6) {
+                            if model.variableKeys.isEmpty && model.malformedTokens.isEmpty {
+                                Text("No variables. Add a {{name}} token in Instructions.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            ForEach(model.variableKeys, id: \.self) { key in
+                                variableRow(key: key, value: Binding(
+                                    get: { model.variableValues[key] ?? "" },
+                                    set: { model.variableValues[key] = $0 }))
+                            }
+                            if !model.malformedTokens.isEmpty {
+                                Label("Unrecognized: \(model.malformedTokens.joined(separator: ", ")). Use letters, digits, or _ inside {{ }}.",
+                                      systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption).foregroundStyle(.orange)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
-                        field("Target language") {
-                            TextField("e.g. English", text: $model.target)
-                                .textFieldStyle(.roundedBorder)
-                        }
+                        .padding(10)
+                        .glassCard(radius: 8)
                     }
 
                     field("Instructions") {
                         TextEditor(text: $model.instructions)
                             .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 150)
+                            .frame(minHeight: 240)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                        Text("Use {{source}} and {{target}} as placeholders.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     DisclosureGroup("Generation config") {
                         GenConfigControls(config: $model.config).padding(.top, 4)
                     }
                     .font(.callout)
+                    .fontWeight(.semibold)
 
                     DisclosureGroup("Output schema") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -138,6 +153,7 @@ struct GlossView: View {
                         .padding(.top, 4)
                     }
                     .font(.callout)
+                    .fontWeight(.semibold)
 
                     Button {
                         Task { await model.run() }
@@ -250,8 +266,20 @@ struct GlossView: View {
     @ViewBuilder
     private func field<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
             content()
+        }
+    }
+
+    private func variableRow(key: String, value: Binding<String>) -> some View {
+        HStack(spacing: 8) {
+            Text("{{\(key)}}")
+                .font(.system(.caption, design: .monospaced).weight(.medium))
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+            TextField("value", text: value).textFieldStyle(.roundedBorder)
         }
     }
 

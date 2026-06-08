@@ -86,8 +86,9 @@ let presets: [PromptPreset] = [
 @Observable
 final class PlaygroundModel {
     var sentence: String = "Der Hund schläft."
-    var source: String = "German"
-    var target: String = "English"
+    /// Values for the `{{name}}` placeholders in `instructions`, keyed by variable name.
+    /// Seeded with the gloss preset's source/target languages.
+    var variableValues: [String: String] = ["source": "German", "target": "English"]
     var selectedPresetID: String
     var instructions: String
 
@@ -113,6 +114,39 @@ final class PlaygroundModel {
     var selectedPreset: PromptPreset {
         presets.first { $0.id == selectedPresetID } ?? presets[0]
     }
+
+    /// `{{name}}` with optional inner whitespace; the capture group is the trimmed variable name.
+    /// One source of truth for both key detection and run-time substitution so they can't drift.
+    static let variablePattern = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/
+
+    /// Variable names referenced as `{{name}}` in `instructions`, in first-appearance order, deduped.
+    /// Inner whitespace is trimmed, so `{{native}}`, `{{native }}`, and `{{ native }}` are one variable.
+    var variableKeys: [String] {
+        var seen = Set<String>()
+        var keys: [String] = []
+        for match in instructions.matches(of: Self.variablePattern) {
+            let key = String(match.1)
+            if seen.insert(key).inserted { keys.append(key) }
+        }
+        return keys
+    }
+
+    /// `{{…}}` fragments whose contents aren't a clean variable name (letters/digits/underscore).
+    /// Surfaced as a warning so malformed tokens like `{{na me}}` or `{{}}` aren't dropped silently.
+    var malformedTokens: [String] {
+        var bad: [String] = []
+        for match in instructions.matches(of: /\{\{(.*?)\}\}/) {
+            let inner = String(match.1)
+            if inner.trimmingCharacters(in: .whitespaces).wholeMatch(of: /[A-Za-z0-9_]+/) == nil {
+                bad.append("{{\(inner)}}")
+            }
+        }
+        return bad
+    }
+
+    /// Read accessors for the gloss task's language mapping (used when saving a dataset example).
+    var source: String { variableValues["source"] ?? "" }
+    var target: String { variableValues["target"] ?? "" }
 
     /// Reset the editable instructions to the chosen preset's default template.
     func loadPresetDefaults(for id: String) {
@@ -155,9 +189,9 @@ final class PlaygroundModel {
         isRunning = true
         defer { isRunning = false }
 
-        let resolved = instructions
-            .replacingOccurrences(of: "{{source}}", with: source)
-            .replacingOccurrences(of: "{{target}}", with: target)
+        let resolved = instructions.replacing(Self.variablePattern) { match in
+            variableValues[String(match.1)] ?? ""
+        }
         resolvedInstructions = resolved
 
         // Fresh session per run so a prior run never biases the next (clean A/B testing).

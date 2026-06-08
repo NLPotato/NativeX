@@ -61,9 +61,20 @@ struct SchemaEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Type name", text: $def.typeName).textFieldStyle(.roundedBorder)
-            TextField("Description (guides the model)", text: $def.description)
-                .textFieldStyle(.roundedBorder).font(.caption)
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Schema name").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                    TextField("TypeName", text: $def.typeName).textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Description").font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
+                    TextField("Guides the model — what this schema represents", text: $def.description)
+                        .textFieldStyle(.roundedBorder).font(.caption)
+                }
+            }
+            .padding(10)
+            .glassCard(radius: 10)
+
             FieldsEditor(fields: $def.fields, depth: 0)
         }
     }
@@ -203,8 +214,10 @@ struct ArrayEditor: View {
             }
             TypeEditor(type: element, depth: depth + 1)
         }
-        .padding(.leading, 8)
-        .overlay(alignment: .leading) { Rectangle().fill(.quaternary).frame(width: 2) }
+        .padding(.leading, 14)
+        .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
     }
 }
 
@@ -229,7 +242,9 @@ struct ObjectEditor: View {
             TextField("Description", text: desc).textFieldStyle(.roundedBorder).font(.caption)
             FieldsEditor(fields: fields, depth: depth + 1)
         }
-        .padding(.leading, 8)
-        .overlay(alignment: .leading) { Rectangle().fill(.quaternary).frame(width: 2) }
+        .padding(.leading, 14)
+        .background(Color.white.opacity(0.03 * Double(min(depth + 1, 3))),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.25)).frame(width: 3) }
     }
 }

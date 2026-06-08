@@ -222,7 +222,7 @@ struct PipelineView: View {
     @ViewBuilder
     private func labeled<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.footnote).fontWeight(.medium).foregroundStyle(.primary.opacity(0.6))
             content()
         }
     }
