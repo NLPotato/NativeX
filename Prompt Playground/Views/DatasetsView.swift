@@ -11,6 +11,7 @@
 
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct DatasetsView: View {
     @Environment(\.modelContext) private var context
@@ -18,6 +19,8 @@ struct DatasetsView: View {
 
     @State private var selectedDatasetID: UUID?
     @State private var showingNewDataset = false
+    @State private var showingImporter = false
+    @State private var importError: String?
     @State private var editorTarget: ExampleEditorSheet.Target?
 
     @State private var renamingDataset: DatasetModel?
@@ -40,6 +43,13 @@ struct DatasetsView: View {
             NewDatasetSheet { selectedDatasetID = $0 }
         }
         .sheet(item: $editorTarget) { ExampleEditorSheet(target: $0) }
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: [.commaSeparatedText, .json],
+                      allowsMultipleSelection: false) { importFile($0) }
+        .alert("Import failed", isPresented: Binding(
+            get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+            Button("OK", role: .cancel) { importError = nil }
+        } message: { Text(importError ?? "") }
         .alert("Rename dataset", isPresented: Binding(
             get: { renamingDataset != nil },
             set: { if !$0 { renamingDataset = nil } })) {
@@ -73,6 +83,9 @@ struct DatasetsView: View {
                 HStack {
                     Text("Datasets").font(.dsTitle)
                     Spacer()
+                    Button { showingImporter = true } label: { Image(systemName: "square.and.arrow.down") }
+                        .buttonStyle(.borderless)
+                        .help("Import a CSV or JSON file as a dataset")
                     Button { showingNewDataset = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless)
                         .help("New dataset")
@@ -190,6 +203,40 @@ struct DatasetsView: View {
         context.delete(d)                       // cascade removes its examples (Storage.swift)
         try? context.save()
         if selectedDatasetID == deletedID { selectedDatasetID = fallback }
+    }
+
+    /// Import a picked .csv / .json file as a new `.custom` dataset: one example per row. The `input`
+    /// column (if present) becomes the run's message; every other column becomes a `{{var}}` value (so it
+    /// shows as a port when an Input binds this dataset). `id` (if present) labels the row.
+    private func importFile(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let err):
+            importError = err.localizedDescription
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let table = try DatasetImport.parse(data: data, filename: url.lastPathComponent)
+                let base = url.deletingPathExtension().lastPathComponent
+                let d = DatasetModel(task: .custom, name: base.isEmpty ? "Imported dataset" : base)
+                context.insert(d)
+                for (i, row) in table.rows.enumerated() {
+                    let label = row["id"].flatMap { $0.isEmpty ? nil : $0 } ?? "Row \(i + 1)"
+                    var vars = row
+                    vars.removeValue(forKey: "input")
+                    let json = JSONCoder.encode(RunInput(input: row["input"] ?? "", variables: vars))
+                    let ex = ExampleModel(task: .custom, label: label, inputJSON: json)
+                    ex.dataset = d
+                    context.insert(ex)
+                }
+                try? context.save()
+                selectedDatasetID = d.id
+            } catch {
+                importError = error.localizedDescription
+            }
+        }
     }
 
     private func duplicateDataset(_ d: DatasetModel) {

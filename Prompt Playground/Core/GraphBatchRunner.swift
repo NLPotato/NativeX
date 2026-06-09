@@ -5,8 +5,9 @@
 //  Runs a whole graph over every row of a dataset — the Graph tab's batch lane. It orchestrates the
 //  EXISTING single-pass GraphExecutor (one run per row, the row's values injected at the dataset-bound
 //  Input node) and persists each row as a RunModel under one ExperimentModel — the same shape a Lab
-//  experiment produces, so the result shows in the Lab and feeds VariantStats. Sequential (the on-device
-//  model serves one session at a time) and cancellable, mirroring ExperimentRunner.
+//  experiment produces, so the result shows in the Lab and feeds VariantStats. Each row is ALSO logged to
+//  Run History as one TraceModel (per-row input→output trace). Sequential (the on-device model serves one
+//  session at a time) and cancellable, mirroring ExperimentRunner.
 //
 
 import Foundation
@@ -61,6 +62,11 @@ final class GraphBatchRunner {
             do {
                 let result = try await GraphExecutor.run(graph, row: example.rowValues)
                 data = result.asRunResultData()
+                // Also log this row to Run History (one TraceModel per row), alongside the Lab experiment —
+                // same trace GraphView persists for a single run. Guard on non-empty steps like persistRun.
+                if !result.trace.steps.isEmpty {
+                    context.insert(TraceModel(result.trace, sourceName: "\(graphName) · \(example.label)"))
+                }
             } catch {
                 let (type, text) = classify(error)
                 data = RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
