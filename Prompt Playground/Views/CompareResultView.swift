@@ -17,9 +17,14 @@ struct CompareResultView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: DS.Space.sm) {
                 Text("Comparison").font(.dsTitle)
-                Text("\(outcome.lanes.count) lanes").font(.dsCaption).foregroundStyle(.secondary)
+                Text(outcome.datasetName != nil
+                     ? "\(outcome.lanes.count) lanes × \(outcome.rows) rows"
+                     : "\(outcome.lanes.count) lanes")
+                    .font(.dsCaption).foregroundStyle(.secondary)
                 Spacer()
-                Text("Saved to Lab as a sweep").font(.dsMicro).foregroundStyle(.tertiary)
+                Text(outcome.datasetName != nil ? "Saved as a Lab sweep · per-row outputs in Run History"
+                                                : "Saved to Lab as a sweep")
+                    .font(.dsMicro).foregroundStyle(.tertiary)
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .padding(DS.Space.lg)
@@ -50,11 +55,17 @@ struct CompareResultView: View {
     }
 
     private func laneColumn(_ lane: CompareLaneResult) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.sm) {
+        // Dataset mode: metrics are per-lane means and the body is row 1's output (a sample).
+        let batch = lane.rowCount != 1
+        return VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.sm) {
                 Image(systemName: lane.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(lane.ok ? Color.dsSuccess : Color.dsDanger).font(.dsCaption)
                 Text(lane.title).font(.dsLabel).lineLimit(1)
+            }
+            if batch {
+                Text("\(lane.rowCount) rows · \(Int((lane.decodeRate * 100).rounded()))% decoded · sample below")
+                    .font(.dsMicro).foregroundStyle(.secondary)
             }
             ScrollView {
                 Text(lane.ok ? (lane.output.isEmpty ? "—" : lane.output) : (lane.error ?? "Failed"))
@@ -65,7 +76,7 @@ struct CompareResultView: View {
             }
             .frame(height: 280)
             HStack(spacing: DS.Space.md) {
-                metric("\(lane.ms) ms")
+                metric("\(batch ? "avg " : "")\(lane.ms) ms")
                 metric("~\(lane.promptTokens) prompt")
                 metric("~\(lane.outputTokens) out")
             }

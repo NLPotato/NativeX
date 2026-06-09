@@ -134,6 +134,9 @@ struct GraphView: View {
                 Button("Insert example: compare (A/B)") {
                     engine.graph = GraphEngine.exampleCompare(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
                 }
+                Button("Insert example: compare × dataset") {
+                    engine.graph = GraphEngine.exampleCompareDataset(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
+                }
                 Divider()
                 if saved.isEmpty {
                     Text("No saved graphs")

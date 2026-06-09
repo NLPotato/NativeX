@@ -592,4 +592,66 @@ final class GraphEngine {
         ]
         return g
     }
+
+    /// Phase-3 demo: ONE input feeding TWO lanes that differ in PIPELINE SHAPE, not just wording —
+    ///  • Lane A (single-shot): one FM extracts words (gloss schema).
+    ///  • Lane B (consecutive): FM 1 extracts words → its output feeds {{words}} of FM 2, which elaborates.
+    /// A Compare node references both terminal groups. Ships with a STATIC input so it runs immediately;
+    /// switch the Input's source to a CSV/JSON-imported dataset (cols input/proficiency/language) and
+    /// "Run comparison" fans both lanes over every row → a Lab sweep that ranks them.
+    static func exampleCompareDataset() -> GraphDef {
+        let tutor = """
+            You are a {{language}} tutor. Your job is to help English speakers learn {{language}} with \
+            extracted words from the given sentence(s). You should extract words considering the proficiency \
+            of the learner, which is {{proficiency}}.
+            """
+        let input = GraphNode.input(source: .staticLiteral,
+                                    statics: ["input": "In Deutschland können viele Kinder nicht sicher schwimmen.",
+                                              "proficiency": "intermediate", "language": "German"],
+                                    x: 40, y: 380, title: "Input (rebind to dataset)")
+
+        // Lane A — single-shot extraction.
+        let groupA = GraphNode.promptGroup(title: "Lane A · single-shot", x: 360, y: 40)
+        let instrA = GraphNode.instruction(tutor, groupID: groupA.id, x: 420, y: 120, title: "Instruction A")
+        let currentA = GraphNode.current(template: "sentence(s): {{input}}", groupID: groupA.id, x: 420, y: 300, title: "Current A")
+        let guidedA = GraphNode.guided(.glossLike, groupID: groupA.id, x: 700, y: 300, title: "Gloss schema A")
+        let fmA = GraphNode.fm(x: 1000, y: 120, title: "FM A")
+
+        // Lane B step 1 — same extraction.
+        let groupB1 = GraphNode.promptGroup(title: "Lane B · extract", x: 360, y: 470)
+        let instrB1 = GraphNode.instruction(tutor, groupID: groupB1.id, x: 420, y: 550, title: "Instruction B1")
+        let currentB1 = GraphNode.current(template: "sentence(s): {{input}}", groupID: groupB1.id, x: 420, y: 730, title: "Current B1")
+        let guidedB1 = GraphNode.guided(.glossLike, groupID: groupB1.id, x: 700, y: 730, title: "Gloss schema B1")
+        let fmB1 = GraphNode.fm(x: 1000, y: 550, title: "FM B1 · extract")
+
+        // Lane B step 2 — elaborate on the words FM B1 produced.
+        let groupB2 = GraphNode.promptGroup(title: "Lane B · elaborate", x: 1320, y: 470)
+        let instrB2 = GraphNode.instruction("For EACH of the words, help the {{language}} learner learn the words with their meanings and usages.",
+                                            groupID: groupB2.id, x: 1380, y: 550, title: "Instruction B2")
+        let currentB2 = GraphNode.current(template: "word(s): {{words}}", groupID: groupB2.id, x: 1380, y: 730, title: "Current B2")
+        let fmB2 = GraphNode.fm(x: 1700, y: 550, title: "FM B2 · elaborate")
+
+        let compare = GraphNode.compare(laneGroupIDs: [groupA.id, groupB2.id], x: 2000, y: 320, title: "Compare A/B")
+
+        var g = GraphDef(nodes: [input, groupA, instrA, currentA, guidedA, fmA,
+                                 groupB1, instrB1, currentB1, guidedB1, fmB1,
+                                 groupB2, instrB2, currentB2, fmB2, compare])
+        g.edges = [
+            // Lane A wiring.
+            GraphEdge(fromNodeID: input.id,   outputKey: "input",       toNodeID: currentA.id,  inputPort: "input"),
+            GraphEdge(fromNodeID: input.id,   outputKey: "language",    toNodeID: instrA.id,    inputPort: "language"),
+            GraphEdge(fromNodeID: input.id,   outputKey: "proficiency", toNodeID: instrA.id,    inputPort: "proficiency"),
+            GraphEdge(fromNodeID: groupA.id,  outputKey: "prompt",      toNodeID: fmA.id,       inputPort: "prompt"),
+            // Lane B step 1.
+            GraphEdge(fromNodeID: input.id,   outputKey: "input",       toNodeID: currentB1.id, inputPort: "input"),
+            GraphEdge(fromNodeID: input.id,   outputKey: "language",    toNodeID: instrB1.id,   inputPort: "language"),
+            GraphEdge(fromNodeID: input.id,   outputKey: "proficiency", toNodeID: instrB1.id,   inputPort: "proficiency"),
+            GraphEdge(fromNodeID: groupB1.id, outputKey: "prompt",      toNodeID: fmB1.id,      inputPort: "prompt"),
+            // The chain: FM B1's output → {{words}} of lane B step 2.
+            GraphEdge(fromNodeID: fmB1.id,    outputKey: "output",      toNodeID: currentB2.id, inputPort: "words"),
+            GraphEdge(fromNodeID: input.id,   outputKey: "language",    toNodeID: instrB2.id,   inputPort: "language"),
+            GraphEdge(fromNodeID: groupB2.id, outputKey: "prompt",      toNodeID: fmB2.id,      inputPort: "prompt"),
+        ]
+        return g
+    }
 }

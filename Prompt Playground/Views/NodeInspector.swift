@@ -358,6 +358,7 @@ private struct CompareEditor: View {
     @Binding var node: GraphNode
     @Environment(\.modelContext) private var context
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
+    @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
     @State private var runner = GraphCompareRunner()
     @State private var showResult = false
 
@@ -368,11 +369,21 @@ private struct CompareEditor: View {
     private var runnableSelected: [UUID] { selectedIDs.filter(feedsFM) }
     /// The saved graph's name (matches the batch lane's label) — falls back when the graph is unsaved.
     private var graphName: String { saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph" }
+    /// The dataset bound to this graph's Input, if any — when present, "Run comparison" fans each lane
+    /// over every row (Phase 3) instead of the single static input.
+    private var boundDataset: DatasetModel? {
+        guard let id = engine.graph.nodes.first(where: {
+            $0.kind == .input && $0.input?.source == .dataset
+        })?.input?.datasetID else { return nil }
+        return datasets.first { $0.id == id }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             DSSectionHeader("Lanes")
-            Text("Pick the Prompt groups to compare. Each runs on the same input — only the prompt varies.")
+            Text(boundDataset != nil
+                 ? "Pick the Prompt groups to compare. Each lane runs over every row of the bound dataset → a Lab sweep."
+                 : "Pick the Prompt groups to compare. Each runs on the same input — only the prompt varies.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
             if groups.isEmpty {
@@ -397,7 +408,7 @@ private struct CompareEditor: View {
             Button { runComparison() } label: {
                 HStack(spacing: DS.Space.sm) {
                     if runner.isRunning { ProgressView().controlSize(.small) }
-                    Text(runner.isRunning ? "Running…" : "Run comparison").frame(maxWidth: .infinity)
+                    Text(runComparisonLabel).frame(maxWidth: .infinity)
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -429,11 +440,21 @@ private struct CompareEditor: View {
             })
     }
 
+    private var runComparisonLabel: String {
+        if runner.isRunning {
+            return boundDataset != nil ? "Row \(runner.completed)/\(runner.total)…" : "Running…"
+        }
+        if let ds = boundDataset { return "Run comparison × \(ds.name) (\(ds.examples.count) rows)" }
+        return "Run comparison"
+    }
+
     private func runComparison() {
         let ids = selectedIDs
         let name = graphName
+        let dataset = boundDataset
         Task {
-            await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: name, context: context)
+            await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: name,
+                             dataset: dataset, context: context)
             if runner.lastOutcome != nil { showResult = true }
         }
     }
