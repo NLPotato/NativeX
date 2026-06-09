@@ -170,6 +170,7 @@ struct GraphNode: Codable, Identifiable, Equatable, Sendable {
     var kind: NodeKind
     var x: Double = 0                       // canvas-space position
     var y: Double = 0
+    var h: Double? = nil                    // manual card-height override (drag the resize grip); nil = auto
     var title: String = ""
     var groupID: UUID? = nil                // non-nil ⇒ a member block of that prompt group
 

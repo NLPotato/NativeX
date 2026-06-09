@@ -196,6 +196,7 @@ private struct NodeCardView: View {
     let node: GraphNode
 
     @State private var moveStart: CGPoint? = nil
+    @State private var resizeStartH: CGFloat? = nil
 
     private var run: GraphNodeRun? { engine.runs[node.id] }
     private var selected: Bool { engine.selection == node.id }
@@ -207,7 +208,15 @@ private struct NodeCardView: View {
             ForEach(0..<NodeMetrics.rows(node), id: \.self) { row in
                 portRow(row).frame(height: NodeMetrics.portSlot)
             }
-            Spacer(minLength: 0)
+            if let preview = NodeMetrics.previewText(node) {
+                Text(preview)
+                    .font(.dsMicro).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, DS.Space.md).padding(.top, 2).padding(.bottom, DS.Space.sm)
+                    .clipped()
+            } else {
+                Spacer(minLength: 0)
+            }
         }
         .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
         .background(
@@ -222,9 +231,29 @@ private struct NodeCardView: View {
         .shadow(color: selected ? tint.opacity(0.55) : .black.opacity(0.28),
                 radius: selected ? 12 : 4, y: selected ? 0 : 2)   // selected node lifts off the board
         .overlay(alignment: .topLeading) { portDots }
+        .overlay(alignment: .bottomTrailing) { resizeGrip }
         .contentShape(Rectangle())
         .onTapGesture { engine.selection = node.id }
         .gesture(moveGesture)
+    }
+
+    /// A corner grip on text blocks: drag down to give a lengthy prompt more room on the card.
+    @ViewBuilder private var resizeGrip: some View {
+        if NodeMetrics.previewText(node) != nil {
+            Image(systemName: "arrow.down.right")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(coordinateSpace: .named(graphBoardSpace))
+                        .onChanged { v in
+                            if resizeStartH == nil { engine.snapshot(); resizeStartH = NodeMetrics.height(node) }
+                            engine.resizeNode(node.id, to: (resizeStartH ?? 0) + v.translation.height / engine.scale)
+                        }
+                        .onEnded { _ in resizeStartH = nil }
+                )
+                .help("Drag to resize")
+        }
     }
 
     private var tint: Color { kindTint(node.kind) }

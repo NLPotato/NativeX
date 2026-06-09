@@ -21,9 +21,37 @@ enum NodeMetrics {
     static let portSlot: CGFloat = 26
     static let footer: CGFloat = 14
     static let portDot: CGFloat = 11
+    static let previewSlot: CGFloat = 70 // body band that shows a text block's content on the card
 
     static func rows(_ n: GraphNode) -> Int { max(n.inputPorts.count, n.outputKeys.count, 1) }
-    static func height(_ n: GraphNode) -> CGFloat { header + CGFloat(rows(n)) * portSlot + footer }
+
+    /// The text a block shows on its card face (so the prompt is visible without opening the inspector),
+    /// or nil for non-text nodes. Drives the preview band + whether a resize grip is offered.
+    static func previewText(_ n: GraphNode) -> String? {
+        let raw: String?
+        switch n.kind {
+        case .instruction: raw = n.instruction?.text
+        case .history:     raw = n.history?.content
+        case .current:     raw = n.current?.template
+        case .tool:        raw = n.tool?.toolDescription
+        case .fewshot:     raw = n.fewshot?.shots.first.map { "\($0.user) → \($0.assistant)" }
+        default:           raw = nil
+        }
+        guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Auto height with no manual override: header + ports + footer, plus a preview band for text blocks.
+    static func autoHeight(_ n: GraphNode) -> CGFloat {
+        header + CGFloat(rows(n)) * portSlot + footer + (previewText(n) != nil ? previewSlot : 0)
+    }
+    /// Floor for a manual resize — never smaller than the header + ports + footer.
+    static func minHeight(_ n: GraphNode) -> CGFloat { header + CGFloat(rows(n)) * portSlot + footer }
+
+    static func height(_ n: GraphNode) -> CGFloat {
+        if let h = n.h { return max(minHeight(n), CGFloat(h)) }   // manual override (drag grip), clamped
+        return autoHeight(n)
+    }
     static func rowCenterY(_ index: Int) -> CGFloat { header + CGFloat(index) * portSlot + portSlot / 2 }
 
     /// Canvas-space anchor of an input port (left edge) / output port (right edge).
@@ -181,6 +209,11 @@ final class GraphEngine {
 
     func move(_ id: UUID, to p: CGPoint) {
         if let i = index(id) { graph.nodes[i].x = p.x; graph.nodes[i].y = p.y }
+    }
+
+    /// Set a node's manual card height (drag the resize grip), clamped to its content floor.
+    func resizeNode(_ id: UUID, to h: CGFloat) {
+        if let i = index(id) { graph.nodes[i].h = Double(max(NodeMetrics.minHeight(graph.nodes[i]), h)) }
     }
 
     /// Connect an upstream output key into a downstream input port (one edge per input port).
