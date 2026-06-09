@@ -72,6 +72,10 @@ struct GraphView: View {
                 .keyboardShortcut("l", modifiers: .command)
                 .help("Connect every unwired {{var}} to a same-named output (e.g. an Input’s learning → a block’s {{learning}})")
 
+            Button { engine.duplicateSelection() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                .disabled(engine.selection == nil)
+                .keyboardShortcut("d", modifiers: .command)
+
             Button(role: .destructive) { engine.deleteSelectionOrEdge() } label: { Label("Delete", systemImage: "trash") }
                 .disabled(engine.selection == nil && engine.selectedEdge == nil)
                 .tint(.red)

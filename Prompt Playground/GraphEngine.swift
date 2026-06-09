@@ -155,6 +155,17 @@ final class GraphEngine {
 
     func deleteSelection() { if let id = selection { deleteNode(id) } }
 
+    /// Clone the selected node (new id, nudged position), keeping a block's group membership. Edges are
+    /// not copied — the clone starts unwired. A duplicated Prompt group starts empty (members aren't deep-copied).
+    func duplicateSelection() {
+        guard let id = selection, var n = graph.node(id) else { return }
+        snapshot()
+        n.id = UUID()
+        n.x += 36; n.y += 36
+        graph.nodes.append(n)
+        selection = n.id
+    }
+
     func deleteNode(_ id: UUID) {
         snapshot()
         // Deleting a Prompt group orphans its members (they keep groupID pointing at nothing) — clear it

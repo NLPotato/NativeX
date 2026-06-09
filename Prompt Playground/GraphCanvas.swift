@@ -53,6 +53,8 @@ struct GraphCanvas: View {
             .coordinateSpace(name: graphBoardSpace)
             .onDeleteCommand { engine.deleteSelectionOrEdge() }
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
+            // Figma/Photoshop-style floating bar — actions for the current selection, pinned bottom-center.
+            .overlay(alignment: .bottom) { CanvasContextBar(engine: engine).padding(.bottom, DS.Space.lg) }
         }
     }
 
@@ -535,5 +537,78 @@ private struct ScrollZoomMonitor: NSViewRepresentable {
             }
         }
         func remove() { if let m = monitor { NSEvent.removeMonitor(m); monitor = nil } }
+    }
+}
+
+// MARK: - Contextual bottom toolbar
+
+/// A floating capsule bar pinned to the bottom-center of the canvas whose actions change with the
+/// selection (Figma's contextual toolbar / Photoshop's options bar): quick node creation + auto-link
+/// when nothing is selected, and node/edge actions (duplicate, auto-link, add-block, delete) otherwise.
+private struct CanvasContextBar: View {
+    @Bindable var engine: GraphEngine
+
+    var body: some View {
+        HStack(spacing: DS.Space.sm) {
+            if let n = engine.selectedNode {
+                Image(systemName: n.kind.symbol).foregroundStyle(.secondary)
+                Text(n.title.isEmpty ? n.kind.label : n.title).font(.dsCaption.weight(.medium)).lineLimit(1)
+                bar
+                if n.kind == .promptGroup { addBlockMenu }
+                iconButton("plus.square.on.square", "Duplicate (⌘D)") { engine.duplicateSelection() }
+                iconButton("link", "Auto-link variables (⌘L)", tint: Theme.accent) { engine.autoWireMatchingVars() }
+                iconButton("trash", "Delete (⌫)", role: .destructive) { engine.deleteSelectionOrEdge() }
+            } else if engine.selectedEdge != nil {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").foregroundStyle(.secondary)
+                Text("Wire").font(.dsCaption.weight(.medium))
+                bar
+                iconButton("scissors", "Delete wire (⌫)", role: .destructive) { engine.deleteSelectionOrEdge() }
+            } else {
+                addNodeMenu
+                iconButton("link", "Auto-link variables (⌘L)", tint: Theme.accent) { engine.autoWireMatchingVars() }
+                iconButton("arrow.up.left.and.arrow.down.right", "Fit to view (⌘0)") { engine.fitToView() }
+            }
+        }
+        .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+        .tint(.primary)
+    }
+
+    private var bar: some View { Divider().frame(height: 16).padding(.horizontal, 2) }
+
+    private func iconButton(_ symbol: String, _ help: String, tint: Color = .primary,
+                            role: ButtonRole? = nil, _ action: @escaping () -> Void) -> some View {
+        Button(role: role, action: action) { Image(systemName: symbol).frame(width: 22, height: 18) }
+            .buttonStyle(.borderless).tint(role == .destructive ? .red : tint).help(help)
+    }
+
+    /// The same node palette as the top toolbar's Add menu, blocks nested under Prompt. New nodes land
+    /// at the viewport center.
+    private var addNodeMenu: some View {
+        Menu {
+            addItem(.promptGroup)
+            Menu { ForEach(blockKinds, id: \.self) { addItem($0) } } label: { Label("Prompt blocks", systemImage: "square.stack.3d.up") }
+            Divider()
+            addItem(.input); addItem(.nativeAPI); addItem(.hook); addItem(.fm)
+        } label: { Image(systemName: "plus").frame(width: 22, height: 18) }
+        .menuStyle(.borderlessButton).fixedSize().help("Add node")
+    }
+
+    /// When a Prompt group is selected: add a block straight into it (addNode drops it inside the frame).
+    private var addBlockMenu: some View {
+        Menu {
+            ForEach(blockKinds, id: \.self) { addItem($0) }
+        } label: { Image(systemName: "plus.rectangle.on.rectangle").frame(width: 22, height: 18) }
+        .menuStyle(.borderlessButton).fixedSize().help("Add a block to this Prompt")
+    }
+
+    private var blockKinds: [NodeKind] { [.instruction, .fewshot, .history, .current, .guided, .tool] }
+
+    private func addItem(_ kind: NodeKind) -> some View {
+        Button { engine.addNode(kind, at: engine.viewportCenterCanvas) } label: {
+            Label(kind.label, systemImage: kind.symbol)
+        }
     }
 }
