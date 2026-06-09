@@ -53,14 +53,28 @@ enum SeedData {
         try? context.save()
     }
 
-    /// Seed starter node-graphs once (independent of the prompt/dataset seed, since GraphModel is new
-    /// and an existing store already has templates — so its guard would otherwise skip these).
+    /// Seed starter node-graphs. Version-gated (NOT just count>0) so a v2 model update REPLACES the
+    /// stale default seeds — but only the unmodified ones (matched by their seed names); any graph the
+    /// user renamed or built is left untouched.
+    static let graphSeedVersion = 2
+
     static func seedGraphsIfNeeded(_ context: ModelContext) {
-        let count = (try? context.fetchCount(FetchDescriptor<GraphModel>())) ?? 0
-        guard count == 0 else { return }
+        let key = "graphSeedVersion"
+        let stored = UserDefaults.standard.integer(forKey: key)      // 0 when never set
+        let existing = (try? context.fetch(FetchDescriptor<GraphModel>())) ?? []
+        if existing.isEmpty {
+            insertSeedGraphs(context)
+        } else if stored < graphSeedVersion {
+            for g in existing where g.name == "Gloss graph" || g.name == "Chat (multi-turn)" { context.delete(g) }
+            insertSeedGraphs(context)
+        }
+        UserDefaults.standard.set(graphSeedVersion, forKey: key)
+        try? context.save()
+    }
+
+    private static func insertSeedGraphs(_ context: ModelContext) {
         context.insert(GraphModel(name: "Gloss graph", graph: GraphEngine.exampleGloss()))
         context.insert(GraphModel(name: "Chat (multi-turn)", graph: GraphEngine.exampleChat()))
-        try? context.save()
     }
 
     // MARK: Gloss

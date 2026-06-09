@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 let graphBoardSpace = "graphboard"
 
@@ -30,10 +31,11 @@ struct GraphCanvas: View {
                     .gesture(pan)
                     .simultaneousGesture(zoom)
 
-                // Scaled content layer (canvas space).
+                // Scaled content layer (canvas space). Group frames paint FIRST (behind edges + cards).
                 ZStack(alignment: .topLeading) {
+                    GroupFrameLayer(engine: engine)
                     EdgeLayer(engine: engine)
-                    ForEach(engine.graph.nodes) { node in
+                    ForEach(engine.graph.nodes.filter { $0.kind != .promptGroup }) { node in
                         NodeCardView(engine: engine, node: node)
                             .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
                             .offset(x: node.x, y: node.y)
@@ -43,10 +45,12 @@ struct GraphCanvas: View {
                 .offset(engine.offset)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .background(ScrollZoomMonitor { factor, p in engine.zoom(by: factor, around: p) })
             .clipped()
             .contentShape(Rectangle())
             .coordinateSpace(name: graphBoardSpace)
             .onDeleteCommand { engine.deleteSelection() }
+            .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
         }
     }
 
@@ -81,11 +85,16 @@ private struct EdgeLayer: View {
         Canvas { ctx, _ in
             for edge in engine.graph.edges {
                 guard let a = outAnchor(edge), let b = inAnchor(edge) else { continue }
-                ctx.stroke(curve(a, b), with: .color(Theme.accent.opacity(0.6)), lineWidth: 2)
+                // Edges are chrome (muted) except those touching the selected node — focus the topology
+                // around what you're editing rather than washing the whole board in accent.
+                let touchesSelection = engine.selection != nil
+                    && (edge.fromNodeID == engine.selection || edge.toNodeID == engine.selection)
+                let style: GraphicsContext.Shading = touchesSelection
+                    ? .color(Theme.accent.opacity(0.85)) : .color(.white.opacity(0.18))
+                ctx.stroke(curve(a, b), with: style, lineWidth: touchesSelection ? 2.5 : 1.5)
             }
-            if let pf = engine.pendingFrom, let pt = engine.pendingPoint,
-               let n = engine.graph.node(pf.node), let j = n.outputKeys.firstIndex(of: pf.key) {
-                ctx.stroke(curve(NodeMetrics.outputAnchor(n, j), pt),
+            if let pf = engine.pendingFrom, let pt = engine.pendingPoint, let a = pendingAnchor(pf) {
+                ctx.stroke(curve(a, pt),
                            with: .color(Theme.accent.opacity(0.5)),
                            style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
             }
@@ -94,9 +103,17 @@ private struct EdgeLayer: View {
         .allowsHitTesting(false)
     }
 
+    private func pendingAnchor(_ pf: (node: UUID, key: String)) -> CGPoint? {
+        guard let n = engine.graph.node(pf.node) else { return nil }
+        if n.kind == .promptGroup { return engine.groupOutAnchor(n.id) }
+        guard let j = n.outputKeys.firstIndex(of: pf.key) else { return nil }
+        return NodeMetrics.outputAnchor(n, j)
+    }
+
     private func outAnchor(_ e: GraphEdge) -> CGPoint? {
-        guard let n = engine.graph.node(e.fromNodeID),
-              let j = n.outputKeys.firstIndex(of: e.outputKey) else { return nil }
+        guard let n = engine.graph.node(e.fromNodeID) else { return nil }
+        if n.kind == .promptGroup { return engine.groupOutAnchor(n.id) }   // group → FM edge
+        guard let j = n.outputKeys.firstIndex(of: e.outputKey) else { return nil }
         return NodeMetrics.outputAnchor(n, j)
     }
     private func inAnchor(_ e: GraphEdge) -> CGPoint? {
@@ -148,12 +165,16 @@ private struct NodeCardView: View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: node.kind.symbol)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.dsAccent)
+                .foregroundStyle(.secondary)            // selection border carries the accent, not every icon
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.title.isEmpty ? node.kind.label : node.title)
                     .font(.dsLabel).lineLimit(1)
-                Text(faceSummary).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
+                if let preview = runPreview {
+                    Text(preview).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Text(faceSummary).font(.dsMicro).foregroundStyle(faceTint).lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
             statusDot
@@ -178,7 +199,7 @@ private struct NodeCardView: View {
             }
             Spacer(minLength: 0)
             if row < node.outputKeys.count {
-                Text(node.outputKeys[row]).font(.dsMicro.weight(.medium)).foregroundStyle(.dsAccent).lineLimit(1)
+                Text(node.outputKeys[row]).font(.dsMicro.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, DS.Space.md)
@@ -188,13 +209,16 @@ private struct NodeCardView: View {
     private var portDots: some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, port in
-                portDot(filled: engine.isConnected(node.id, port: port))
+                // Neon fill on an INPUT dot means "this port is wired" — the one place accent earns its keep.
+                let wired = engine.isConnected(node.id, port: port)
+                portDot(filled: wired, tint: wired ? Theme.accent : .secondary)
                     .position(x: 0, y: NodeMetrics.rowCenterY(i))
                     .onTapGesture(count: 2) { engine.disconnect(to: node.id, port: port) }
                     .help("Double-click to disconnect")
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
-                portDot(filled: true)
+                // Output dots are neutral chrome (you drag FROM them) — not a wiring signal.
+                portDot(filled: false, tint: .secondary)
                     .position(x: NodeMetrics.width, y: NodeMetrics.rowCenterY(j))
                     .gesture(connectGesture(key: key))
             }
@@ -202,29 +226,58 @@ private struct NodeCardView: View {
         .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
     }
 
-    private func portDot(filled: Bool) -> some View {
+    private func portDot(filled: Bool, tint: Color) -> some View {
         Circle()
-            .fill(filled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.background))
-            .overlay(Circle().strokeBorder(Theme.accent, lineWidth: 1.5))
+            .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
+            .overlay(Circle().strokeBorder(tint, lineWidth: 1.5))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
             .contentShape(Circle().inset(by: -6))
     }
 
     private var borderColor: Color {
-        if selected { return Theme.accent }
+        if selected { return Theme.accent }              // selection is the ONE neon signal on a card
         switch run?.status {
         case .error: return .red.opacity(0.7)
-        case .ok:    return Theme.accent.opacity(0.35)
-        default:     return .white.opacity(0.12)
+        default:     return .white.opacity(0.12)         // success is shown by the status dot, not green chrome
         }
     }
 
     private var faceSummary: String {
         switch node.kind {
-        case .message:   return node.message?.role.label ?? "MESSAGE"
-        case .prompt:    return "{{…}} → prompt"
+        case .instruction: return "system"
+        case .fewshot:     return "\(node.fewshot?.shots.count ?? 0) example(s)"
+        case .history:     return node.history?.role.label ?? "turn"
+        case .current:     return "live turn"
+        case .guided:      return node.guided?.schemaDef?.typeName ?? "no schema"
+        case .tool:        return node.tool?.name.isEmpty ?? true ? "tool" : (node.tool?.name ?? "tool")
+        case .input:       return node.input?.source.label ?? "static"
         case .nativeAPI, .hook: return node.hook?.op.displayName ?? node.kind.label
-        case .fm:        return (node.fm?.useGuidedGen ?? false) ? "guided · \(node.fm?.config.sampling.label ?? "")" : "free · \(node.fm?.config.sampling.label ?? "")"
+        case .fm:          return node.fm?.config.sampling.label ?? "default"
+        case .promptGroup: return "prompt"
+        }
+    }
+
+    /// Cyan flags a schema-bearing guided block at a glance; everything else is quiet secondary.
+    private var faceTint: Color {
+        (node.kind == .guided && node.guided?.schemaDef != nil) ? Theme.cyan : .secondary
+    }
+
+    /// After a successful run, the card subtitle peeks at the node's primary output (one line).
+    private var runPreview: String? {
+        guard run?.status == .ok, let outputs = run?.outputs, let key = primaryOutputKey else { return nil }
+        let raw = (outputs[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        let flat = raw.replacingOccurrences(of: "\n", with: " ")
+        return flat.count > 44 ? String(flat.prefix(44)) + "…" : flat
+    }
+
+    /// The output key whose value best represents the node after a run.
+    private var primaryOutputKey: String? {
+        switch node.kind {
+        case .fm:               return "output"
+        case .input:            return node.inputVarNames.first
+        case .nativeAPI, .hook: return node.hook.map { $0.outputVar.isEmpty ? "output" : $0.outputVar }
+        default:                return node.blockOutputKey
         }
     }
 
@@ -236,7 +289,7 @@ private struct NodeCardView: View {
                 engine.move(node.id, to: CGPoint(x: s.x + v.translation.width / engine.scale,
                                                  y: s.y + v.translation.height / engine.scale))
             }
-            .onEnded { _ in moveStart = nil }
+            .onEnded { _ in moveStart = nil; engine.reassignGroup(for: node.id) }   // join/leave a group by where it landed
     }
 
     private func connectGesture(key: String) -> some Gesture {
@@ -253,5 +306,150 @@ private struct NodeCardView: View {
                 engine.pendingFrom = nil
                 engine.pendingPoint = nil
             }
+    }
+}
+
+// MARK: - Prompt group frame
+
+/// Draws each Prompt group as a labeled, dashed frame ENCLOSING its member blocks. Painted first in the
+/// scaled layer (behind edges + cards); the frame body is non-hit-testing so panning falls through, and
+/// only the header band (reserved ABOVE the members) + the right-edge out-port are interactive.
+private struct GroupFrameLayer: View {
+    @Bindable var engine: GraphEngine
+    var body: some View {
+        ForEach(engine.graph.nodes.filter { $0.kind == .promptGroup }) { group in
+            if let rect = engine.groupRect(group.id) {
+                GroupFrameView(engine: engine, group: group, rect: rect)
+                    .offset(x: rect.minX, y: rect.minY)
+            }
+        }
+    }
+}
+
+private struct GroupFrameView: View {
+    @Bindable var engine: GraphEngine
+    let group: GraphNode
+    let rect: CGRect
+    @State private var dragStart: [UUID: CGPoint]? = nil
+
+    private var selected: Bool { engine.selection == group.id }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                .fill(Theme.accent.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                    .strokeBorder(selected ? Theme.accent.opacity(0.85) : Theme.accent.opacity(0.30),
+                                  style: StrokeStyle(lineWidth: selected ? 2 : 1.5, dash: [7, 5])))
+                .allowsHitTesting(false)               // body transparent → background pan falls through
+            header
+            outPort
+        }
+        .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        HStack(spacing: DS.Space.sm) {
+            Image(systemName: "rectangle.3.group").font(.dsCaption).foregroundStyle(.secondary)
+            Text(group.title.isEmpty ? "Prompt" : group.title).font(.dsLabel).lineLimit(1)
+            Text("\(engine.members(of: group.id).count)").font(.dsMicro).foregroundStyle(.tertiary).monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DS.Space.md)
+        .frame(width: rect.width, height: GraphEngine.groupHeader, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { engine.selection = group.id }
+        .gesture(moveGesture)
+    }
+
+    /// The group's single "out" port (right edge, mid-height) — drag to an FM's prompt port.
+    private var outPort: some View {
+        Circle()
+            .fill(Theme.accent.opacity(0.9))
+            .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
+            .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
+            .contentShape(Circle().inset(by: -8))
+            .position(x: rect.width, y: rect.height / 2)
+            .gesture(connectGesture)
+    }
+
+    private var moveGesture: some Gesture {
+        DragGesture(coordinateSpace: .named(graphBoardSpace))
+            .onChanged { v in
+                if dragStart == nil {
+                    var starts = Dictionary(uniqueKeysWithValues:
+                        engine.members(of: group.id).map { ($0.id, CGPoint(x: $0.x, y: $0.y)) })
+                    starts[group.id] = CGPoint(x: group.x, y: group.y)   // move the empty-fallback origin too
+                    dragStart = starts
+                    engine.selection = group.id
+                }
+                let dx = v.translation.width / engine.scale, dy = v.translation.height / engine.scale
+                for (id, start) in dragStart ?? [:] {
+                    engine.move(id, to: CGPoint(x: start.x + dx, y: start.y + dy))
+                }
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    private var connectGesture: some Gesture {
+        DragGesture(coordinateSpace: .named(graphBoardSpace))
+            .onChanged { v in
+                engine.pendingFrom = (group.id, "prompt")
+                engine.pendingPoint = engine.toCanvas(v.location)
+            }
+            .onEnded { v in
+                let drop = engine.toCanvas(v.location)
+                if let hit = engine.hitInputPort(near: drop) {
+                    engine.connect(from: group.id, key: "prompt", to: hit.node, port: hit.port)
+                }
+                engine.pendingFrom = nil
+                engine.pendingPoint = nil
+            }
+    }
+}
+
+// MARK: - Scroll-wheel zoom
+
+/// Zoom on mouse-wheel / two-finger scroll, anchored under the cursor. Uses a LOCAL scroll-wheel
+/// event monitor rather than an overlay NSView: an AppKit view can't receive `scrollWheel` without
+/// also stealing `mouseDown` (both route through `hitTest`), which would break pan / drag-to-connect.
+/// The monitor sees scroll events without touching mouse events, so the SwiftUI gestures stay intact.
+private struct ScrollZoomMonitor: NSViewRepresentable {
+    /// (zoom factor for this tick, board-space point under the cursor).
+    let onScroll: (CGFloat, CGPoint) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let v = FlippedView()                      // top-left origin → matches SwiftUI board space
+        context.coordinator.view = v
+        context.coordinator.install()
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) { context.coordinator.onScroll = onScroll }
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.remove() }
+    func makeCoordinator() -> Coordinator { Coordinator(onScroll: onScroll) }
+
+    final class FlippedView: NSView { override var isFlipped: Bool { true } }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var onScroll: (CGFloat, CGPoint) -> Void
+        private var monitor: Any?
+
+        init(onScroll: @escaping (CGFloat, CGPoint) -> Void) { self.onScroll = onScroll }
+
+        func install() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, let view = self.view, let window = view.window, event.window === window
+                else { return event }
+                let p = view.convert(event.locationInWindow, from: nil)
+                guard view.bounds.contains(p), event.scrollingDeltaY != 0 else { return event }
+                // Trackpad sends many tiny precise deltas; a mouse wheel sends a few large line deltas.
+                let per: CGFloat = event.hasPreciseScrollingDeltas ? 0.0025 : 0.04
+                let factor = min(max(1 + event.scrollingDeltaY * per, 0.9), 1.1)   // smooth, clamped per tick
+                self.onScroll(factor, CGPoint(x: p.x, y: p.y))
+                return nil                          // consume so the canvas itself doesn't also scroll
+            }
+        }
+        func remove() { if let m = monitor { NSEvent.removeMonitor(m); monitor = nil } }
     }
 }

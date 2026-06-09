@@ -2,15 +2,23 @@
 //  GraphCore.swift
 //  Prompt Playground
 //
-//  Node-graph data model — the ComfyUI/FigJam-style canvas that unifies the Single-shot + Chat tabs.
-//  A GraphDef is a DAG of typed nodes wired by EXPLICIT (outputKey → inputPort) edges over a
-//  LangChain-style [String:String] dataflow. It reuses the existing pipeline primitives wholesale —
-//  Vars substitution, HookDef/HookEngine, GenConfig, SchemaDef/DynamicRun — so the graph is mostly a
-//  visual surface over logic that already ships. Execution lives in GraphExecutor.
+//  Node-graph data model (v2) — the ComfyUI/FigJam-style canvas that unifies Single-shot + Chat.
 //
-//  Persisted as ONE JSON blob on GraphModel (Storage.swift), matching the SchemaModel.defJSON
-//  convention. The node payload is a struct-of-optionals (not a Codable enum) so SwiftUI can bind
-//  straight into a node's typed config (e.g. $node.fm.config) and reuse the existing control views.
+//  THE MODEL. The overloaded word "Prompt" is unwound into distinct primitives:
+//    • A **Prompt** is a framed GROUP — a container node (`.promptGroup`) that ASSEMBLES typed
+//      member BLOCKS into one request fed to a model. Members carry `groupID` (the SINGLE source of
+//      truth for membership — the executor does NOT walk edges to decide what's in a prompt).
+//    • Blocks (each a wireable node, a member via `groupID`): instruction · fewshot · history ·
+//      current · guided · tool. Blocks hold TEMPLATE text with {{vars}} and NO literal values.
+//    • **Input** is the only place a {{var}} gets a value (static or JSON in v1; csv/excel/dataset
+//      reserved for v2). It feeds blocks' {{vars}} through optional native-api / hook process nodes.
+//    • **Foundation Model** consumes one Prompt group (via a single `promptGroup → fm` edge) + its
+//      own sampling, runs, emits the Generation. Prompt = the request spec; FM = the call.
+//
+//  Persisted as ONE JSON blob on GraphModel (Storage.swift). The node payload is a struct-of-optionals
+//  (not a Codable enum) so SwiftUI binds straight into a node's typed config and reuses the existing
+//  control views (GenConfigControls, SchemaEditorView) verbatim. Old (v1: message/prompt/fm) graphs
+//  are migrated up at load by GraphMigration.swift — see GraphDef.schemaVersion.
 //
 //  NO #Playground block (Xcode auto-runs them and crashes the model).
 //
@@ -20,65 +28,139 @@ import Foundation
 // MARK: - Node kind
 
 enum NodeKind: String, Codable, CaseIterable, Sendable, Identifiable {
-    case message    // a fixed conversation turn (system / human / ai) → FM transcript history
-    case prompt     // a {{var}} template + few-shot → the current user turn
-    case nativeAPI  // a deterministic NaturalLanguage op (HookOp native ops)
-    case hook       // a script / glue transform (HookOp.script + regex/json/text)
-    case fm         // one Foundation Models call (sampling + optional guided generation)
+    // Container — the framed Prompt; assembles its member blocks.
+    case promptGroup
+
+    // Blocks — members of a prompt group (carry `groupID`).
+    case instruction   // system / persona / rules text          (1..n per group)
+    case fewshot       // demonstration user/assistant pairs      (0..n)
+    case history       // one PAST turn (human / ai)              (0..n)
+    case current       // the live turn (Input-fed)               (0..1)
+    case guided        // output schema (SchemaDef)               (0..1)
+    case tool          // title + description                     (0..n; v1 = instructions text)
+
+    // Free nodes.
+    case input         // variable source: static | json (csv/excel/dataset reserved for v2)
+    case nativeAPI     // deterministic NaturalLanguage op (HookDef)
+    case hook          // script / glue transform (HookDef)
+    case fm            // the model call (sampling + execution)
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .message:   return "Message"
-        case .prompt:    return "Prompt"
-        case .nativeAPI: return "Native API"
-        case .hook:      return "Hook"
-        case .fm:        return "Foundation Model"
+        case .promptGroup: return "Prompt"
+        case .instruction: return "Instruction"
+        case .fewshot:     return "Few-shot"
+        case .history:     return "History"
+        case .current:     return "Current turn"
+        case .guided:      return "Guided output"
+        case .tool:        return "Tool"
+        case .input:       return "Input"
+        case .nativeAPI:   return "Native API"
+        case .hook:        return "Hook"
+        case .fm:          return "Foundation Model"
         }
     }
 
     /// SF Symbol shown on the node face + palette.
     var symbol: String {
         switch self {
-        case .message:   return "bubble.left.and.bubble.right"
-        case .prompt:    return "text.alignleft"
-        case .nativeAPI: return "cpu"
-        case .hook:      return "terminal"
-        case .fm:        return "brain"
+        case .promptGroup: return "rectangle.3.group"
+        case .instruction: return "text.justify.left"
+        case .fewshot:     return "list.bullet.rectangle"
+        case .history:     return "clock.arrow.circlepath"
+        case .current:     return "bubble.right.fill"
+        case .guided:      return "curlybraces"
+        case .tool:        return "wrench.and.screwdriver"
+        case .input:       return "arrow.right.to.line"
+        case .nativeAPI:   return "cpu"
+        case .hook:        return "terminal"
+        case .fm:          return "brain"
+        }
+    }
+
+    /// Block kinds are members of a prompt group (gated for drop-into-frame + the Add-block menu).
+    var isBlock: Bool {
+        switch self {
+        case .instruction, .fewshot, .history, .current, .guided, .tool: return true
+        default: return false
         }
     }
 }
 
 // MARK: - Payloads (struct-of-optionals on GraphNode; exactly one is non-nil per kind)
 
-enum MessageRole: String, Codable, CaseIterable, Sendable {
-    case system, human, ai
-    var label: String { rawValue.uppercased() }
+struct PromptGroupPayload: Codable, Equatable, Sendable {
+    var width: Double = 320       // empty-state fallback frame size (when the group has no members)
+    var height: Double = 160
 }
 
-struct MessagePayload: Codable, Equatable, Sendable {
-    var role: MessageRole = .human
-    var content: String = ""        // {{var}} template, resolved at run
-}
+struct InstructionPayload: Codable, Equatable, Sendable {
+    var text: String = ""         // {{var}} template — persona / role / rules / NOT-TO-DO
+}                                 // concat order follows canvas position (top→bottom), see GraphExecutor.assemble
 
-/// One few-shot exemplar appended into the resolved prompt as a User/Assistant pair.
+/// One few-shot exemplar appended into the instructions as a User/Assistant pair.
 struct FewShot: Codable, Equatable, Sendable, Identifiable {
     var id = UUID()
     var user: String = ""
     var assistant: String = ""
 }
 
-struct PromptPayload: Codable, Equatable, Sendable {
-    var template: String = ""
-    var statics: [String: String] = [:]   // variables filled by a literal value (vs wired by an edge)
-    var fewShots: [FewShot] = []
+struct FewShotPayload: Codable, Equatable, Sendable {
+    var shots: [FewShot] = []
+}
+
+enum TurnRole: String, Codable, CaseIterable, Sendable {
+    case human, ai
+    var label: String { self == .human ? "Human" : "AI" }
+}
+
+struct HistoryPayload: Codable, Equatable, Sendable {
+    var role: TurnRole = .human   // PAST only — system text is an instruction block, not history
+    var content: String = ""      // {{var}} template
+}
+
+struct CurrentTurnPayload: Codable, Equatable, Sendable {
+    var template: String = "{{input}}"   // the present turn; an Input node feeds its {{vars}}
+}
+
+struct GuidedPayload: Codable, Equatable, Sendable {
+    var schemaDef: SchemaDef? = nil      // the Guided Generation schema; nil = not yet authored
+}
+
+struct ToolPayload: Codable, Equatable, Sendable {
+    var name: String = ""
+    var toolDescription: String = ""     // v1: rendered into instructions text, NOT a callable Tool
+}
+
+/// Where an Input node's values come from. Only `.staticLiteral` / `.json` execute in v1; the rest are
+/// stored (so the editor + persistence are forward-compatible) and throw a clear error at run.
+enum InputSource: String, Codable, CaseIterable, Sendable {
+    case staticLiteral, json, csv, excel, dataset
+
+    var label: String {
+        switch self {
+        case .staticLiteral: return "Static"
+        case .json:          return "JSON"
+        case .csv:           return "CSV"
+        case .excel:         return "Excel"
+        case .dataset:       return "Dataset"
+        }
+    }
+    var supportedV1: Bool { self == .staticLiteral || self == .json }
+}
+
+struct InputPayload: Codable, Equatable, Sendable {
+    var source: InputSource = .staticLiteral
+    var statics: [String: String] = [:]   // STATIC: literal {{var}} → value
+    var jsonLiteral: String = ""           // JSON: an object whose top-level scalar keys become {{vars}}
+    var datasetID: UUID? = nil             // v2: bind a DatasetModel row (eval seam)
+    var rowIndex: Int? = nil               // v2: which row when previewing a dynamic source
 }
 
 struct FMPayload: Codable, Equatable, Sendable {
-    var config: GenConfig = GenConfig()
-    var useGuidedGen: Bool = false
-    var schemaDef: SchemaDef? = nil       // the Guided Generation schema, when useGuidedGen
+    var config: GenConfig = GenConfig()    // sampling / decode params; schema lives on the guided block
 }
 
 // MARK: - Node
@@ -86,69 +168,122 @@ struct FMPayload: Codable, Equatable, Sendable {
 struct GraphNode: Codable, Identifiable, Equatable, Sendable {
     var id = UUID()
     var kind: NodeKind
-    var x: Double = 0                      // canvas-space position
+    var x: Double = 0                       // canvas-space position
     var y: Double = 0
     var title: String = ""
+    var groupID: UUID? = nil                // non-nil ⇒ a member block of that prompt group
+
     // Exactly one payload is non-nil, selected by `kind`. `hook` backs both .hook and .nativeAPI.
-    var message: MessagePayload? = nil
-    var prompt:  PromptPayload?  = nil
-    var hook:    HookDef?        = nil
-    var fm:      FMPayload?      = nil
+    var group:       PromptGroupPayload? = nil
+    var instruction: InstructionPayload? = nil
+    var fewshot:     FewShotPayload?     = nil
+    var history:     HistoryPayload?     = nil
+    var current:     CurrentTurnPayload? = nil
+    var guided:      GuidedPayload?      = nil
+    var tool:        ToolPayload?        = nil
+    var input:       InputPayload?       = nil
+    var hook:        HookDef?            = nil
+    var fm:          FMPayload?          = nil
 }
 
 extension GraphNode {
-    static func message(role: MessageRole = .human, content: String = "",
+    static func promptGroup(title: String = "Prompt", x: Double = 0, y: Double = 0) -> GraphNode {
+        GraphNode(kind: .promptGroup, x: x, y: y, title: title, group: PromptGroupPayload())
+    }
+    static func instruction(_ text: String = "", groupID: UUID? = nil,
+                            x: Double = 0, y: Double = 0, title: String = "Instruction") -> GraphNode {
+        GraphNode(kind: .instruction, x: x, y: y, title: title, groupID: groupID,
+                  instruction: InstructionPayload(text: text))
+    }
+    static func fewshot(_ shots: [FewShot] = [], groupID: UUID? = nil,
+                        x: Double = 0, y: Double = 0, title: String = "Few-shot") -> GraphNode {
+        GraphNode(kind: .fewshot, x: x, y: y, title: title, groupID: groupID,
+                  fewshot: FewShotPayload(shots: shots))
+    }
+    static func history(role: TurnRole = .human, content: String = "", groupID: UUID? = nil,
                         x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
-        GraphNode(kind: .message, x: x, y: y, title: title ?? "Message",
-                  message: MessagePayload(role: role, content: content))
+        GraphNode(kind: .history, x: x, y: y, title: title ?? "History", groupID: groupID,
+                  history: HistoryPayload(role: role, content: content))
     }
-
-    static func prompt(template: String = "", statics: [String: String] = [:], fewShots: [FewShot] = [],
-                       x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
-        GraphNode(kind: .prompt, x: x, y: y, title: title ?? "Prompt",
-                  prompt: PromptPayload(template: template, statics: statics, fewShots: fewShots))
+    static func current(template: String = "{{input}}", groupID: UUID? = nil,
+                        x: Double = 0, y: Double = 0, title: String = "Current turn") -> GraphNode {
+        GraphNode(kind: .current, x: x, y: y, title: title, groupID: groupID,
+                  current: CurrentTurnPayload(template: template))
     }
-
+    static func guided(_ def: SchemaDef? = nil, groupID: UUID? = nil,
+                       x: Double = 0, y: Double = 0, title: String = "Guided output") -> GraphNode {
+        GraphNode(kind: .guided, x: x, y: y, title: title, groupID: groupID,
+                  guided: GuidedPayload(schemaDef: def))
+    }
+    static func tool(name: String = "", description: String = "", groupID: UUID? = nil,
+                     x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
+        GraphNode(kind: .tool, x: x, y: y, title: title ?? "Tool", groupID: groupID,
+                  tool: ToolPayload(name: name, toolDescription: description))
+    }
+    static func input(source: InputSource = .staticLiteral, statics: [String: String] = [:],
+                      jsonLiteral: String = "", x: Double = 0, y: Double = 0, title: String = "Input") -> GraphNode {
+        GraphNode(kind: .input, x: x, y: y, title: title,
+                  input: InputPayload(source: source, statics: statics, jsonLiteral: jsonLiteral))
+    }
     static func nativeAPI(op: HookOp = .tokenizeWords, inputVar: String = "input", outputVar: String? = nil,
                           params: [String: String] = [:], x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
         GraphNode(kind: .nativeAPI, x: x, y: y, title: title ?? op.displayName,
                   hook: HookDef(op: op, inputVar: inputVar, outputVar: outputVar, params: params))
     }
-
     static func hook(op: HookOp = .script, inputVar: String = "input", outputVar: String? = nil,
                      params: [String: String] = [:], x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
         GraphNode(kind: .hook, x: x, y: y, title: title ?? op.displayName,
                   hook: HookDef(op: op, inputVar: inputVar, outputVar: outputVar, params: params))
     }
-
-    static func fm(config: GenConfig = GenConfig(), useGuidedGen: Bool = false, schemaDef: SchemaDef? = nil,
-                   x: Double = 0, y: Double = 0, title: String? = nil) -> GraphNode {
-        GraphNode(kind: .fm, x: x, y: y, title: title ?? "Foundation Model",
-                  fm: FMPayload(config: config, useGuidedGen: useGuidedGen, schemaDef: schemaDef))
+    static func fm(config: GenConfig = GenConfig(), x: Double = 0, y: Double = 0,
+                   title: String = "Foundation Model") -> GraphNode {
+        GraphNode(kind: .fm, x: x, y: y, title: title, fm: FMPayload(config: config))
     }
 
-    /// Output keys this node produces (used by the canvas to draw output ports + validation).
+    /// Output keys this node exposes as right-edge ports on the canvas. Blocks have NO output ports —
+    /// the group reads them by `groupID` membership, not by an edge.
     var outputKeys: [String] {
         switch kind {
-        case .message:           return ["message"]
-        case .prompt:            return ["prompt"]
-        case .nativeAPI, .hook:  return [hook.map { $0.outputVar.isEmpty ? "output" : $0.outputVar } ?? "output"]
-        case .fm:                return (fm?.useGuidedGen ?? false) ? ["output", "json"] : ["output"]
+        case .promptGroup:      return ["prompt"]            // the assembled request → FM
+        case .input:            return inputVarNames          // one port per produced variable
+        case .nativeAPI, .hook: return [hook.map { $0.outputVar.isEmpty ? "output" : $0.outputVar } ?? "output"]
+        case .fm:               return ["output", "json"]
+        default:                return []                     // blocks: consumed by membership
         }
     }
 
-    /// Named input ports this node accepts (declared; an edge may still target any port name).
-    /// `prev` (message) and `history` (FM) are STRUCTURAL threading ports — they establish
-    /// conversation order / ancestry for the FM transcript, not a data variable.
+    /// Named input ports this node accepts (left-edge). A {{var}} in a block's template is an input port
+    /// (fed by an Input node or a process node). The FM consumes a Prompt group via its `prompt` port.
     var inputPorts: [String] {
         switch kind {
-        case .message:           return ["prev"] + Vars.keys(in: message?.content ?? "")
-        case .prompt:
-            // Every {{var}} in the template that has no literal static value is an input port.
-            let statics = prompt?.statics ?? [:]
-            return Vars.keys(in: prompt?.template ?? "").filter { (statics[$0] ?? "").isEmpty }
-        case .nativeAPI, .hook:  return [hook?.inputVar ?? "input"]
-        case .fm:                return ["prompt", "history"]
+        case .promptGroup:      return []                     // assembles members by groupID, not ports
+        case .instruction:      return Vars.keys(in: instruction?.text ?? "")
+        case .history:          return Vars.keys(in: history?.content ?? "")
+        case .current:          return Vars.keys(in: current?.template ?? "")
+        case .fewshot, .guided, .tool, .input: return []
+        case .nativeAPI, .hook: return [hook?.inputVar ?? "input"]
+        case .fm:               return ["prompt"]
+        }
+    }
+
+    /// Variables an Input node supplies (its output ports).
+    var inputVarNames: [String] {
+        guard kind == .input, let p = input else { return [] }
+        switch p.source {
+        case .staticLiteral: return p.statics.keys.sorted()
+        case .json:          return GraphJSON.topLevelKeys(p.jsonLiteral)
+        default:             return []                        // v2 sources: ports come from the bound source
+        }
+    }
+
+    /// The executor's stored-output key for a block (independent of canvas ports). The group reads these.
+    var blockOutputKey: String? {
+        switch kind {
+        case .instruction: return "text"
+        case .history:     return "turn"
+        case .current:     return "currentturn"
+        case .fewshot:     return "fewshot"
+        default:           return nil
         }
     }
 }
@@ -166,15 +301,27 @@ struct GraphEdge: Codable, Identifiable, Equatable, Sendable {
 // MARK: - Graph
 
 struct GraphDef: Codable, Equatable, Sendable {
+    /// Bumped when the node model changes shape. Absent in old JSON ⇒ treated as 1 (legacy) by the
+    /// dict-level migrator (GraphMigration.swift). New in-memory graphs default to the current version.
+    var schemaVersion: Int = GraphDef.currentVersion
     var nodes: [GraphNode] = []
     var edges: [GraphEdge] = []
 
+    static let currentVersion = 2
     static let empty = GraphDef()
 
     func node(_ id: UUID) -> GraphNode? { nodes.first { $0.id == id } }
 
     /// Edges whose target is `id`.
     func incoming(_ id: UUID) -> [GraphEdge] { edges.filter { $0.toNodeID == id } }
+
+    /// Member blocks of a prompt group (the SINGLE source of truth for group membership).
+    func members(of groupID: UUID) -> [GraphNode] { nodes.filter { $0.groupID == groupID } }
+
+    /// The prompt group feeding an FM node (the source of its single incoming `promptGroup → fm` edge).
+    func promptGroupID(feeding fmID: UUID) -> UUID? {
+        incoming(fmID).first { node($0.fromNodeID)?.kind == .promptGroup }?.fromNodeID
+    }
 }
 
 // MARK: - Per-node run result (drives the canvas status badges + inline trace)
@@ -188,4 +335,29 @@ struct GraphNodeRun: Identifiable, Sendable {
     var ms: Int? = nil
     var error: String? = nil
     var note: String? = nil
+}
+
+// MARK: - JSON helpers (Input(json) variable extraction)
+
+enum GraphJSON {
+    /// Top-level keys of a JSON object literal whose values are scalars (the only ones that map cleanly
+    /// onto a `[String:String]` dataflow value). Arrays/objects are skipped. `[]` if not a JSON object.
+    static func topLevelKeys(_ literal: String) -> [String] {
+        scalarObject(literal).keys.sorted()
+    }
+
+    /// Parse a JSON object literal into a `[String:String]` of its top-level SCALAR fields.
+    static func scalarObject(_ literal: String) -> [String: String] {
+        guard let data = literal.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (k, v) in obj {
+            switch v {
+            case let s as String:   out[k] = s
+            case let n as NSNumber: out[k] = n.stringValue   // numbers + booleans bridge through NSNumber
+            default: break                                   // skip nested arrays/objects in v1
+            }
+        }
+        return out
+    }
 }

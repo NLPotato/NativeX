@@ -13,6 +13,16 @@
 
 import SwiftUI
 
+// MARK: - Wired-input mapping (one resolved incoming edge, for the inspector's "Wired inputs" view)
+
+struct WiredInput: Identifiable {
+    var id: String { port }          // one edge per input port (enforced by GraphEngine.connect)
+    let port: String                 // input port on the selected node
+    let sourceTitle: String          // upstream node's display title
+    let sourceKey: String            // upstream output key feeding this port
+    let value: String?               // value carried on the edge after a run (nil before)
+}
+
 // MARK: - Canvas geometry (analytic anchors)
 
 enum NodeMetrics {
@@ -29,6 +39,9 @@ enum NodeMetrics {
     /// Canvas-space anchor of an input port (left edge) / output port (right edge).
     static func inputAnchor(_ n: GraphNode, _ i: Int) -> CGPoint { CGPoint(x: n.x, y: n.y + rowCenterY(i)) }
     static func outputAnchor(_ n: GraphNode, _ j: Int) -> CGPoint { CGPoint(x: n.x + width, y: n.y + rowCenterY(j)) }
+
+    /// Canvas-space rect a single node card occupies (mirrors how GraphCanvas places it).
+    static func frame(_ n: GraphNode) -> CGRect { CGRect(x: n.x, y: n.y, width: width, height: height(n)) }
 }
 
 // MARK: - Engine
@@ -42,6 +55,7 @@ final class GraphEngine {
     // Canvas transform (canvas → board: p*scale + offset).
     var scale: CGFloat = 1
     var offset: CGSize = .zero
+    var viewportSize: CGSize = .zero   // canvas pane size (written by GraphCanvas) — anchors button zoom
 
     // Run state.
     var isRunning = false
@@ -67,6 +81,8 @@ final class GraphEngine {
     func addNode(_ kind: NodeKind, at p: CGPoint) {
         var n = GraphEngine.make(kind)
         n.x = p.x; n.y = p.y
+        // Adding a block while a Prompt group is selected drops it straight into that group.
+        if kind.isBlock, let sel = selection, graph.node(sel)?.kind == .promptGroup { n.groupID = sel }
         graph.nodes.append(n)
         selection = n.id
     }
@@ -121,6 +137,33 @@ final class GraphEngine {
         CGPoint(x: (b.x - offset.width) / scale, y: (b.y - offset.height) / scale)
     }
 
+    static let zoomRange: ClosedRange<CGFloat> = 0.3...2.5
+
+    /// Multiply the zoom by `factor`, keeping the board point `p` stationary under the cursor.
+    func zoom(by factor: CGFloat, around p: CGPoint) {
+        let newScale = min(max(scale * factor, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        guard newScale != scale else { return }
+        let k = newScale / scale
+        offset = CGSize(width: p.x - (p.x - offset.width) * k,
+                        height: p.y - (p.y - offset.height) * k)
+        scale = newScale
+    }
+
+    private var viewportCenter: CGPoint { CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2) }
+    func zoomIn()  { zoom(by: 1.15, around: viewportCenter) }
+    func zoomOut() { zoom(by: 1 / 1.15, around: viewportCenter) }
+
+    /// Each incoming edge resolved for display: which upstream node/output feeds an input port,
+    /// plus the value carried on that edge after a run. Drives the inspector's "Wired inputs" map.
+    func incomingMap(_ id: UUID) -> [WiredInput] {
+        graph.incoming(id).map { e in
+            let src = graph.node(e.fromNodeID)
+            let title = (src?.title.isEmpty == false ? src?.title : src?.kind.label) ?? "?"
+            return WiredInput(port: e.inputPort, sourceTitle: title,
+                              sourceKey: e.outputKey, value: runs[e.fromNodeID]?.outputs[e.outputKey])
+        }
+    }
+
     /// Nearest input port whose anchor is within tolerance of a canvas point (drag-to-connect drop).
     func hitInputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, port: String)? {
         var best: (node: UUID, port: String, d: CGFloat)? = nil
@@ -134,67 +177,111 @@ final class GraphEngine {
         return best.map { ($0.node, $0.port) }
     }
 
+    // MARK: Prompt groups (the framed container; membership = groupID)
+
+    static let groupPad: CGFloat = 24
+    static let groupHeader: CGFloat = 30   // canvas-space header band reserved ABOVE the members
+
+    func members(of groupID: UUID) -> [GraphNode] { graph.nodes.filter { $0.groupID == groupID } }
+
+    /// The frame enclosing a group's members (canvas space); the group node's own x/y/size when empty.
+    func groupRect(_ groupID: UUID) -> CGRect? {
+        guard let g = graph.node(groupID), g.kind == .promptGroup else { return nil }
+        return frameRect(members(of: groupID).map(NodeMetrics.frame), group: g)
+    }
+
+    /// Same rect EXCLUDING one node — for drop-in/out hit-testing without a member containing itself.
+    func rectExcluding(_ excluded: UUID, in groupID: UUID) -> CGRect? {
+        guard let g = graph.node(groupID), g.kind == .promptGroup else { return nil }
+        return frameRect(members(of: groupID).filter { $0.id != excluded }.map(NodeMetrics.frame), group: g)
+    }
+
+    private func frameRect(_ rects: [CGRect], group g: GraphNode) -> CGRect {
+        guard let first = rects.first else {
+            return CGRect(x: g.x, y: g.y, width: g.group?.width ?? 320, height: g.group?.height ?? 160)
+        }
+        let union = rects.dropFirst().reduce(first) { $0.union($1) }
+        let p = GraphEngine.groupPad
+        return CGRect(x: union.minX - p, y: union.minY - p - GraphEngine.groupHeader,
+                      width: union.width + p * 2, height: union.height + p * 2 + GraphEngine.groupHeader)
+    }
+
+    /// Canvas-space anchor of a group's single "out" port (right edge of the frame, mid-height).
+    func groupOutAnchor(_ groupID: UUID) -> CGPoint? {
+        groupRect(groupID).map { CGPoint(x: $0.maxX, y: $0.midY) }
+    }
+
+    /// Assign/clear a block's group by where its CENTER landed (called when a member drag ends).
+    func reassignGroup(for id: UUID) {
+        guard let i = index(id), graph.nodes[i].kind.isBlock else { return }
+        let n = graph.nodes[i]
+        let c = CGPoint(x: n.x + NodeMetrics.width / 2, y: n.y + NodeMetrics.height(n) / 2)
+        let hit = graph.nodes.first { $0.kind == .promptGroup && (rectExcluding(id, in: $0.id)?.contains(c) ?? false) }
+        graph.nodes[i].groupID = hit?.id
+    }
+
     // MARK: Factories
 
     static func make(_ kind: NodeKind) -> GraphNode {
         switch kind {
-        case .message:   return .message(role: .system, content: "")
-        case .prompt:    return .prompt(template: "{{prompt}}")
-        case .nativeAPI: return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words", params: ["format": "numbered"])
-        case .hook:      return .hook(op: .script, inputVar: "input", outputVar: "result", params: ["timeout": "30"])
-        case .fm:        return .fm()
+        case .promptGroup: return .promptGroup()
+        case .instruction: return .instruction("You are a helpful assistant.")
+        case .fewshot:     return .fewshot([FewShot()])
+        case .history:     return .history(role: .human, content: "")
+        case .current:     return .current(template: "{{input}}")
+        case .guided:      return .guided(.glossLike)
+        case .tool:        return .tool(name: "", description: "")
+        case .input:       return .input(source: .staticLiteral, statics: ["input": ""])
+        case .nativeAPI:   return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words", params: ["format": "numbered"])
+        case .hook:        return .hook(op: .script, inputVar: "input", outputVar: "result", params: ["timeout": "30"])
+        case .fm:          return .fm()
         }
     }
 
-    /// A runnable demo: message(system) ← tokenized words ; prompt(sentence) → FM(guided gloss).
-    /// Same shape as the old Single-shot gloss preset, but with the hidden hook→{{words}} coupling
-    /// made an explicit, visible edge.
+    /// Single-shot gloss as a Prompt group: instruction (NO data) + current turn (the sentence + its
+    /// numbered words — the data lives in the USER turn) + guided schema, all wired from an Input node
+    /// (the sentence) through a deterministic tokenizer. The FM consumes the group as one unit.
     static func exampleGloss() -> GraphDef {
-        let sys = GraphNode.message(
-            role: .system,
-            content: """
-            You are a German tutor; the learner's native language is English. Below is a German \
-            sentence and a numbered list of its words. For EACH listed word, in order, give its single \
-            best meaning in this sentence as one short English gloss. Then give a natural English \
-            translation of the whole sentence.
-
-            Words:
-            {{words}}
-            """,
-            x: 60, y: 80, title: "System")
-        let prompt = GraphNode.prompt(template: "{{sentence}}",
-                                      statics: ["sentence": "Der Hund schläft."],
-                                      x: 60, y: 360, title: "Sentence")
+        let group = GraphNode.promptGroup(title: "Prompt", x: 380, y: 40)
+        let instr = GraphNode.instruction("""
+            You are a German tutor; the learner's native language is English. For EACH numbered word in \
+            the user's turn, in order, give its single best meaning in this sentence as one short English \
+            gloss. Then give a natural English translation of the whole sentence.
+            """, groupID: group.id, x: 440, y: 120, title: "Instruction")
+        let current = GraphNode.current(template: "Sentence: {{sentence}}\n\nWords:\n{{words}}",
+                                        groupID: group.id, x: 440, y: 400, title: "Current turn")
+        let guided = GraphNode.guided(.glossLike, groupID: group.id, x: 720, y: 400, title: "Guided output")
+        let input = GraphNode.input(source: .staticLiteral, statics: ["sentence": "Der Hund schläft."],
+                                    x: 40, y: 300, title: "Sentence")
         let tok = GraphNode.nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words",
-                                      params: ["format": "numbered"], x: 380, y: 380, title: "Tokenize words")
-        let fm = GraphNode.fm(useGuidedGen: true, schemaDef: .glossLike, x: 700, y: 200, title: "Foundation Model")
-        var g = GraphDef(nodes: [sys, prompt, tok, fm])
+                                      params: ["format": "numbered"], x: 40, y: 520, title: "Tokenize words")
+        let fm = GraphNode.fm(x: 1020, y: 240, title: "Foundation Model")
+        var g = GraphDef(nodes: [group, instr, current, guided, input, tok, fm])
         g.edges = [
-            GraphEdge(fromNodeID: prompt.id, outputKey: "prompt", toNodeID: tok.id, inputPort: "text"),
-            GraphEdge(fromNodeID: tok.id,    outputKey: "words",  toNodeID: sys.id, inputPort: "words"),
-            GraphEdge(fromNodeID: prompt.id, outputKey: "prompt", toNodeID: fm.id,  inputPort: "prompt"),
-            GraphEdge(fromNodeID: sys.id,    outputKey: "message", toNodeID: fm.id, inputPort: "history"),
+            GraphEdge(fromNodeID: input.id, outputKey: "sentence", toNodeID: tok.id,     inputPort: "text"),
+            GraphEdge(fromNodeID: input.id, outputKey: "sentence", toNodeID: current.id, inputPort: "sentence"),
+            GraphEdge(fromNodeID: tok.id,   outputKey: "words",    toNodeID: current.id, inputPort: "words"),
+            GraphEdge(fromNodeID: group.id, outputKey: "prompt",   toNodeID: fm.id,      inputPort: "prompt"),
         ]
         return g
     }
 
-    /// A multi-turn chat: message(system) → message(human) → message(ai) chained by `prev`, the last
-    /// wired into the FM's `history` port; a prompt node supplies the current user turn. Demonstrates
-    /// the "conversation is data on the canvas" model — no persistent session.
+    /// Multi-turn chat as a Prompt group: instruction + two PAST history turns (human/ai) + a current
+    /// turn fed by an Input node. The FM consumes the group; no persistent session.
     static func exampleChat() -> GraphDef {
-        let sys = GraphNode.message(role: .system,
-            content: "You are a friendly barista at a Berlin café. Reply only in German, one short turn.",
-            x: 60, y: 60, title: "System")
-        let user1 = GraphNode.message(role: .human, content: "Guten Tag!", x: 60, y: 220, title: "User turn 1")
-        let ai1 = GraphNode.message(role: .ai, content: "Guten Tag! Was darf es sein?", x: 60, y: 360, title: "AI turn 1")
-        let prompt = GraphNode.prompt(template: "Einen Cappuccino, bitte.", x: 380, y: 360, title: "User turn 2")
-        let fm = GraphNode.fm(x: 700, y: 240, title: "Foundation Model")
-        var g = GraphDef(nodes: [sys, user1, ai1, prompt, fm])
+        let group = GraphNode.promptGroup(title: "Prompt", x: 380, y: 40)
+        let instr = GraphNode.instruction("You are a friendly barista at a Berlin café. Reply only in German, one short turn.",
+                                          groupID: group.id, x: 440, y: 120, title: "Instruction")
+        let h1 = GraphNode.history(role: .human, content: "Guten Tag!", groupID: group.id, x: 440, y: 280, title: "History · human")
+        let h2 = GraphNode.history(role: .ai, content: "Guten Tag! Was darf es sein?", groupID: group.id, x: 440, y: 400, title: "History · ai")
+        let current = GraphNode.current(template: "{{input}}", groupID: group.id, x: 440, y: 520, title: "Current turn")
+        let input = GraphNode.input(source: .staticLiteral, statics: ["input": "Einen Cappuccino, bitte."],
+                                    x: 40, y: 520, title: "User input")
+        let fm = GraphNode.fm(x: 780, y: 300, title: "Foundation Model")
+        var g = GraphDef(nodes: [group, instr, h1, h2, current, input, fm])
         g.edges = [
-            GraphEdge(fromNodeID: sys.id,   outputKey: "message", toNodeID: user1.id, inputPort: "prev"),
-            GraphEdge(fromNodeID: user1.id, outputKey: "message", toNodeID: ai1.id,   inputPort: "prev"),
-            GraphEdge(fromNodeID: ai1.id,   outputKey: "message", toNodeID: fm.id,    inputPort: "history"),
-            GraphEdge(fromNodeID: prompt.id, outputKey: "prompt", toNodeID: fm.id,    inputPort: "prompt"),
+            GraphEdge(fromNodeID: input.id, outputKey: "input",  toNodeID: current.id, inputPort: "input"),
+            GraphEdge(fromNodeID: group.id, outputKey: "prompt", toNodeID: fm.id,      inputPort: "prompt"),
         ]
         return g
     }

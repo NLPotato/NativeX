@@ -288,9 +288,11 @@ final class GraphModel {
     var name: String
     var version: Int = 1
     var notes: String = ""
-    var graphJSON: String = "{}"          // GraphDef, encoded — every field defaulted for lightweight migration
+    var graphJSON: String = "{}"          // GraphDef, encoded — migrated up from legacy shapes on read
 
-    var graphDef: GraphDef { JSONCoder.decode(GraphDef.self, graphJSON) ?? GraphDef() }
+    // Routes through GraphMigrator (NOT a bare decode) so legacy v1 blobs are lifted to v2 instead of
+    // silently decoding to an empty GraphDef — which would destroy the user's saved graph with no error.
+    var graphDef: GraphDef { GraphMigrator.load(graphJSON) }
 
     init(name: String, graph: GraphDef = GraphDef(), version: Int = 1, notes: String = "") {
         self.id = UUID()

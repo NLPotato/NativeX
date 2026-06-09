@@ -14,6 +14,7 @@ import SwiftData
 struct GraphView: View {
     @Environment(\.modelContext) private var context
     @State private var engine = GraphEngine(graph: GraphEngine.exampleGloss())
+    @State private var showInspector = true
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
 
     var body: some View {
@@ -26,8 +27,10 @@ struct GraphView: View {
             }
             .frame(minWidth: 480)
 
-            inspectorPane
-                .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth, maxWidth: 540)
+            if showInspector {
+                inspectorPane
+                    .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth, maxWidth: 540)
+            }
         }
     }
 
@@ -35,10 +38,12 @@ struct GraphView: View {
 
     private var toolbar: some View {
         HStack(spacing: DS.Space.md) {
+            // Run is the ONE accent action at rest — everything else is neutral chrome.
             Button { Task { await engine.run() } } label: {
                 Label(engine.isRunning ? "Running…" : "Run", systemImage: "play.fill")
             }
             .disabled(engine.isRunning || engine.graph.nodes.isEmpty)
+            .tint(Theme.accent)
 
             Menu {
                 ForEach(NodeKind.allCases) { kind in
@@ -51,8 +56,17 @@ struct GraphView: View {
 
             Button(role: .destructive) { engine.deleteSelection() } label: { Label("Delete", systemImage: "trash") }
                 .disabled(engine.selection == nil)
+                .tint(.red)
 
             Divider().frame(height: 16)
+
+            // Zoom: − / % / + (also ⌘± ). Anchored to the viewport center via GraphEngine.zoom.
+            Button { engine.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+                .keyboardShortcut("-", modifiers: .command).help("Zoom out")
+            Text("\(Int((engine.scale * 100).rounded()))%")
+                .font(.dsMicro).foregroundStyle(.secondary).monospacedDigit().frame(width: 40)
+            Button { engine.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+                .keyboardShortcut("+", modifiers: .command).help("Zoom in")
             Button { engine.scale = 1; engine.offset = .zero } label: { Label("Reset view", systemImage: "scope") }
 
             Spacer()
@@ -78,16 +92,22 @@ struct GraphView: View {
             .menuStyle(.borderlessButton).fixedSize()
 
             Button { save() } label: { Label("Save", systemImage: "tray.and.arrow.up") }
+
+            Divider().frame(height: 16)
+            Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .help(showInspector ? "Hide inspector" : "Show inspector")
         }
         .padding(.horizontal, DS.Space.lg).padding(.vertical, DS.Space.sm)
         .font(.dsCaption)
+        .tint(.primary)   // neutral chrome by default; Run/Delete override above
     }
 
     // MARK: Inspector
 
     @ViewBuilder private var inspectorPane: some View {
         if let sel = engine.selection, engine.graph.nodes.contains(where: { $0.id == sel }) {
-            NodeInspector(node: nodeBinding(sel))
+            NodeInspector(engine: engine, nodeID: sel).id(sel)
         } else {
             VStack(spacing: DS.Space.md) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
@@ -98,14 +118,6 @@ struct GraphView: View {
             }
             .padding(DS.Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    /// Crash-safe binding into the node identified by `id` (looked up by id in get + set).
-    private func nodeBinding(_ id: UUID) -> Binding<GraphNode> {
-        Binding(
-            get: { engine.graph.nodes.first { $0.id == id } ?? GraphNode(kind: .prompt) },
-            set: { v in if let i = engine.graph.nodes.firstIndex(where: { $0.id == id }) { engine.graph.nodes[i] = v } }
-        )
     }
 
     private func save() {
