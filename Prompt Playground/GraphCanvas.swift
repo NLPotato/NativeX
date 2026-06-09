@@ -13,6 +13,24 @@ import AppKit
 
 let graphBoardSpace = "graphboard"
 
+/// Per-kind accent so the board reads as a typed pipeline at a glance rather than a wall of grey. Calm,
+/// distinct hues (not neon) — used on the node icon, a faint header wash, and the selected border/glow.
+func kindTint(_ kind: NodeKind) -> Color {
+    switch kind {
+    case .promptGroup: return Theme.accent
+    case .instruction: return .blue
+    case .fewshot:     return .indigo
+    case .history:     return .purple
+    case .current:     return .teal
+    case .guided:      return Theme.cyan
+    case .tool:        return .orange
+    case .input:       return .green
+    case .nativeAPI:   return .mint
+    case .hook:        return .brown
+    case .fm:          return .pink
+    }
+}
+
 struct GraphCanvas: View {
     @Bindable var engine: GraphEngine
 
@@ -102,17 +120,20 @@ private struct EdgeLayer: View {
     @Bindable var engine: GraphEngine
 
     var body: some View {
-        Canvas { ctx, _ in
+        // The hue of the selected node — selection-touching wires adopt it so the local topology reads in
+        // one colour instead of everything defaulting to green.
+        let selTint = engine.selection.flatMap { engine.graph.node($0) }.map { kindTint($0.kind) } ?? Theme.accent
+        return Canvas { ctx, _ in
             for edge in engine.graph.edges {
                 guard let (a, b) = engine.edgeAnchors(edge) else { continue }
-                // A selected wire is the ONE bright edge; otherwise muted chrome, brightened a touch when
-                // it touches the selected node so the topology around what you're editing stands out.
+                // A selected wire is the ONE bright edge; otherwise muted chrome, brightened in the selected
+                // node's hue when it touches the selection so the topology you're editing stands out.
                 let selected = engine.selectedEdge == edge.id
                 let touchesSelection = engine.selection != nil
                     && (edge.fromNodeID == engine.selection || edge.toNodeID == engine.selection)
                 let style: GraphicsContext.Shading = selected
                     ? .color(Theme.accent)
-                    : (touchesSelection ? .color(Theme.accent.opacity(0.85)) : .color(.white.opacity(0.18)))
+                    : (touchesSelection ? .color(selTint.opacity(0.9)) : .color(.white.opacity(0.18)))
                 ctx.stroke(graphEdgeCurve(a, b), with: style, lineWidth: selected ? 3 : (touchesSelection ? 2.5 : 1.5))
             }
             // Pending wire while dragging from a port — from an output (a→cursor) or an input (cursor→a).
@@ -189,25 +210,34 @@ private struct NodeCardView: View {
             Spacer(minLength: 0)
         }
         .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous).fill(.ultraThinMaterial))
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                    .fill(tint.opacity(selected ? 0.16 : 0.05)))   // kind identity; brighter when active
+        )
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-            .strokeBorder(borderColor, lineWidth: selected ? 2 : 1))
+            .strokeBorder(borderColor, lineWidth: selected ? 2.5 : 1))
         .overlay { if run?.status == .running { RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Theme.lime, lineWidth: 2).opacity(0.9) } }
+        .shadow(color: selected ? tint.opacity(0.55) : .black.opacity(0.28),
+                radius: selected ? 12 : 4, y: selected ? 0 : 2)   // selected node lifts off the board
         .overlay(alignment: .topLeading) { portDots }
         .contentShape(Rectangle())
         .onTapGesture { engine.selection = node.id }
         .gesture(moveGesture)
     }
 
+    private var tint: Color { kindTint(node.kind) }
+
     private var header: some View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: node.kind.symbol)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)            // selection border carries the accent, not every icon
+                .foregroundStyle(tint)                  // each kind's hue rides on its icon
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.title.isEmpty ? node.kind.label : node.title)
-                    .font(.dsLabel).lineLimit(1)
+                    .font(.dsLabel).lineLimit(1).foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.9)))
                 if let preview = runPreview {
                     Text(preview).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
                 } else {
@@ -219,6 +249,8 @@ private struct NodeCardView: View {
         }
         .padding(.horizontal, DS.Space.md)
         .frame(height: NodeMetrics.header, alignment: .center)
+        .background(tint.opacity(selected ? 0.18 : 0.10), in: UnevenRoundedRectangle(
+            topLeadingRadius: DS.Radius.md, topTrailingRadius: DS.Radius.md))   // colored header strip
     }
 
     @ViewBuilder private var statusDot: some View {
@@ -275,7 +307,7 @@ private struct NodeCardView: View {
     }
 
     private var borderColor: Color {
-        if selected { return Theme.accent }              // selection is the ONE neon signal on a card
+        if selected { return tint }                      // selected border carries the node's own hue
         switch run?.status {
         case .error: return .red.opacity(0.7)
         default:     return .white.opacity(0.12)         // success is shown by the status dot, not green chrome
@@ -420,7 +452,9 @@ private struct GroupFrameView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                .fill(Theme.accent.opacity(dropping ? 0.12 : 0.05))    // brighten while a block is dropping in
+                // Neutral fill (a faint dark veil) so member blocks read clearly — the green is reserved
+                // for the dashed frame + header, not a wash over everything. Greens only while dropping in.
+                .fill(dropping ? Theme.accent.opacity(0.10) : Color.white.opacity(0.025))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
                     .strokeBorder(dropping || selected ? Theme.accent.opacity(0.85) : Theme.accent.opacity(0.30),
                                   style: StrokeStyle(lineWidth: dropping ? 2.5 : (selected ? 2 : 1.5), dash: [7, 5])))
