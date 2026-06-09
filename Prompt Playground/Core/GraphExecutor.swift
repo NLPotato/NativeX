@@ -36,6 +36,7 @@ enum GraphExecutor {
         case missingPromptGroup(node: String)
         case missingCurrentTurn(node: String)
         case dynamicInputUnsupported(source: String)
+        case datasetNeedsBatch(node: String)   // a dataset-bound Input hit on a single (non-batch) run
         case notReady([String])   // pre-run validation (GraphValidator) — aborts before any node runs
 
         var errorDescription: String? {
@@ -45,6 +46,7 @@ enum GraphExecutor {
             case .missingPromptGroup(let n):      return "FM node “\(n)” isn’t fed by a Prompt. Wire a Prompt group’s output into its prompt port."
             case .missingCurrentTurn(let n):      return "Prompt feeding “\(n)” has no current turn. Add a Current-turn block (and an Input to fill it)."
             case .dynamicInputUnsupported(let s): return "Input source “\(s)” isn’t supported yet — use Static or JSON for now."
+            case .datasetNeedsBatch(let n):       return "“\(n)” is bound to a dataset — press “Run dataset” to run over its rows (plain Run is single-shot)."
             case .notReady(let msgs):             return msgs.count == 1 ? msgs[0]
                                                        : "This graph isn’t ready to run:\n• " + msgs.joined(separator: "\n• ")
             }
@@ -77,7 +79,8 @@ enum GraphExecutor {
     // MARK: Entry point
 
     @discardableResult
-    static func run(_ graph: GraphDef, onUpdate: ((GraphNodeRun) -> Void)? = nil) async throws -> RunResult {
+    static func run(_ graph: GraphDef, row: [String: String]? = nil,
+                    onUpdate: ((GraphNodeRun) -> Void)? = nil) async throws -> RunResult {
         guard !graph.nodes.isEmpty else { throw ExecError.emptyGraph }
         let order = try topoSort(graph)
         // Fail FAST, before any node runs: a long pipeline shouldn't grind through hooks + tokenizers only
@@ -95,7 +98,7 @@ enum GraphExecutor {
             onUpdate?(run)
             let start = Date()
             do {
-                run.outputs = try await execute(node, graph: graph, outputs: result.outputs)
+                run.outputs = try await execute(node, graph: graph, outputs: result.outputs, row: row)
                 run.status = .ok
             } catch {
                 run.status = .error
@@ -127,6 +130,10 @@ enum GraphExecutor {
             switch p.source {
             case .staticLiteral: return p.statics
             case .json:          return GraphJSON.scalarObject(p.jsonLiteral)
+            case .dataset:
+                // Batch: GraphBatchRunner injects the current row; emit only this node's declared columns.
+                guard let row else { throw ExecError.datasetNeedsBatch(node: node.title.isEmpty ? node.kind.label : node.title) }
+                return row.filter { node.outputKeys.contains($0.key) }
             default:             throw ExecError.dynamicInputUnsupported(source: p.source.label)
             }
 
@@ -348,5 +355,53 @@ enum GraphExecutor {
         }
         guard order.count == graph.nodes.count else { throw ExecError.cycle }
         return order
+    }
+}
+
+// MARK: - Bridge: a whole-graph execution → one persistable run
+// So batch (GraphBatchRunner) and, later, the Compare runner store a graph run as a RunModel under an
+// ExperimentModel — the SAME shape a Lab run produces, so VariantStats / the leaderboard / parity all reuse.
+
+extension GraphExecutor.RunResult {
+    /// Collapse this execution into one `RunResultData`: the terminal FM output, metrics scored exactly
+    /// like a Lab run (`RunEvaluator`), and the staged trace.
+    func asRunResultData() -> RunResultData {
+        let llm = trace.steps.last { $0.type == "llm" }
+        let firstError = trace.steps.first { !$0.ok }
+        guard let llm else {
+            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: firstError?.errorReason,
+                                 metrics: .failure("generation", latencyMs: trace.totalMs),
+                                 trace: trace.asRunTrace())
+        }
+        let output = llm.output ?? ""
+        let resolvedPrompt = [llm.instructions, llm.currentTurn].compactMap { $0 }.joined(separator: "\n")
+        let json = llm.schemaName != nil ? output : RunPipeline.jsonWrap(output)
+        let metrics = llm.ok
+            ? RunEvaluator.metrics(json: json, decoded: true, latencyMs: trace.totalMs,
+                                   resolvedPrompt: resolvedPrompt, expectedLanguage: "",
+                                   context: llm.contextTokens ?? 0)
+            : .failure("generation", latencyMs: trace.totalMs)
+        return RunResultData(outputJSON: output, turnsJSON: nil,
+                             errorText: llm.ok ? nil : llm.errorReason,
+                             metrics: metrics, trace: trace.asRunTrace())
+    }
+}
+
+extension ExecTrace {
+    /// Map to the Lab's `RunTrace` so a batch/compare run renders in the per-run staged view (StageCardView).
+    func asRunTrace() -> RunTrace {
+        RunTrace(stages: steps.map { s in
+            let body: String
+            if s.type == "llm" {
+                body = [s.instructions.map { "INSTRUCTIONS\n\($0)" },
+                        s.currentTurn.map { "PROMPT\n\($0)" },
+                        s.output.map { "OUTPUT\n\($0)" }].compactMap { $0 }.joined(separator: "\n\n")
+            } else {
+                body = [s.input.map { "IN\n\($0)" },
+                        s.stepOutput.map { "OUT\n\($0)" }].compactMap { $0 }.joined(separator: "\n\n")
+            }
+            return RunTrace.Stage(kind: s.type == "llm" ? "model" : "preHook", ok: s.ok,
+                                  title: s.title, body: body, ms: s.ms, note: s.errorReason)
+        })
     }
 }

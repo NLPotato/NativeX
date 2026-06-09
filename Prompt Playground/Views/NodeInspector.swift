@@ -18,6 +18,7 @@
 //
 
 import SwiftUI
+import SwiftData
 import AppKit
 
 extension Binding {
@@ -262,11 +263,12 @@ private struct InputEditor: View {
     @Binding var node: GraphNode
     let run: GraphNodeRun?
     @State private var newVar = ""
+    @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let p = $node.input.defaulted(InputPayload()) {
-                DSField(label: "Source", help: "The variable values fed into a Prompt’s {{vars}}. Static + JSON run today; CSV/Excel/Dataset are coming.") {
+                DSField(label: "Source", help: "The variable values fed into a Prompt’s {{vars}}. Static + JSON + Dataset run today; CSV/Excel are coming.") {
                     Picker("", selection: p.source) {
                         ForEach(InputSource.allCases, id: \.self) { Text($0.label).tag($0) }
                     }.pickerStyle(.segmented).labelsHidden()
@@ -274,6 +276,7 @@ private struct InputEditor: View {
                 switch node.input?.source ?? .staticLiteral {
                 case .staticLiteral: staticEditor
                 case .json:          jsonEditor(p)
+                case .dataset:       datasetEditor
                 default:
                     Label("“\(node.input?.source.label ?? "")” input isn’t supported yet — use Static or JSON.", systemImage: "clock")
                         .font(.dsCaption).foregroundStyle(.dsWarning).fixedSize(horizontal: false, vertical: true)
@@ -312,6 +315,33 @@ private struct InputEditor: View {
         DSField(label: "JSON object", help: "Top-level scalar fields become {{vars}}.") {
             TextEditor(text: p.jsonLiteral).font(.dsCode).dsEditor(lines: 8)
         }
+    }
+
+    private var datasetEditor: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSField(label: "Dataset", help: "Each row’s values feed the wired {{vars}}. Run the whole dataset from the toolbar’s “Run dataset”.") {
+                Picker("", selection: datasetBinding) {
+                    Text("Choose…").tag(UUID?.none)
+                    ForEach(datasets) { d in Text("\(d.name) · \(d.examples.count) rows").tag(Optional(d.id)) }
+                }.labelsHidden()
+            }
+            if datasets.isEmpty {
+                Text("No datasets yet — create one in the Datasets tab.").font(.dsCaption).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// On dataset selection, also denormalizes the dataset’s columns onto the node so its output ports
+    /// become wireable (and auto-wire can match them to a block’s {{var}} by name).
+    private var datasetBinding: Binding<UUID?> {
+        Binding(
+            get: { node.input?.datasetID },
+            set: { id in
+                node.input?.datasetID = id
+                let cols = id.flatMap { did in datasets.first { $0.id == did } }
+                    .map { Set($0.examples.flatMap { $0.rowValues.keys }).sorted() }
+                node.input?.datasetColumns = cols
+            })
     }
 
     private var staticKeys: [String] { (node.input?.statics.keys).map { $0.sorted() } ?? [] }

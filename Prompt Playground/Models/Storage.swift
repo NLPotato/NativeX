@@ -133,6 +133,16 @@ final class ExampleModel {
     var roleplayInput: Roleplay.Input? { JSONCoder.decode(Roleplay.Input.self, inputJSON) }
     var runInput: RunInput? { JSONCoder.decode(RunInput.self, inputJSON) }
 
+    /// This example flattened to graph dataflow values (`{column: value}`) so a Graph batch can feed each
+    /// row into a dataset-bound Input node. Custom rows expose `input` + their variables; typed rows
+    /// (gloss/roleplay) expose their top-level scalar fields.
+    var rowValues: [String: String] {
+        if task == .custom, let ri = runInput {
+            return ["input": ri.input].merging(ri.variables) { _, b in b }
+        }
+        return GraphJSON.scalarObject(inputJSON)
+    }
+
     init(task: TaskKind, label: String, inputJSON: String, expectedOutput: String = "") {
         self.id = UUID()
         self.createdAt = Date()

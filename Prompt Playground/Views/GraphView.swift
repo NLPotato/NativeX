@@ -17,6 +17,8 @@ struct GraphView: View {
     @State private var engine = GraphEngine(graph: GraphEngine.exampleGloss())
     @State private var showInspector = true
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
+    @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
+    @State private var batch = GraphBatchRunner()
 
     var body: some View {
         HSplitView {
@@ -49,6 +51,20 @@ struct GraphView: View {
             }
             .disabled(engine.isRunning || engine.graph.nodes.isEmpty)
             .tint(Theme.accent)
+
+            // Batch lane: visible only when an Input is bound to a dataset. Runs the graph per row →
+            // one Lab experiment (see GraphBatchRunner). Cancellable; the on-device model runs one at a time.
+            if datasetInput != nil {
+                Button { runOverDataset() } label: {
+                    Label(batch.isRunning ? "Row \(batch.completed)/\(batch.total)…" : "Run dataset",
+                          systemImage: "square.stack.3d.down.right.fill")
+                }
+                .disabled(batch.isRunning || engine.isRunning || boundDataset == nil)
+                .help("Run this graph over every row of the bound dataset → saved as a Lab experiment")
+                if batch.isRunning {
+                    Button { batch.cancel() } label: { Image(systemName: "stop.fill") }.tint(.red)
+                }
+            }
 
             Menu {
                 addItem(.promptGroup, "p")
@@ -160,6 +176,21 @@ struct GraphView: View {
             }
             .padding(DS.Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// The dataset-bound Input node, if any — its presence enables the "Run dataset" batch action.
+    private var datasetInput: GraphNode? {
+        engine.graph.nodes.first { $0.kind == .input && $0.input?.source == .dataset && $0.input?.datasetID != nil }
+    }
+    private var boundDataset: DatasetModel? {
+        datasetInput?.input?.datasetID.flatMap { id in datasets.first { $0.id == id } }
+    }
+
+    /// Fan the current graph over every row of the bound dataset → one Lab experiment (see Lab tab).
+    private func runOverDataset() {
+        guard let ds = boundDataset else { return }
+        let name = saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph"
+        Task { await batch.run(graph: engine.graph, dataset: ds, graphName: name, context: context) }
     }
 
     /// Log the just-finished execution to Run History (one TraceModel per run). Skipped when nothing

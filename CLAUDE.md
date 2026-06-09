@@ -23,7 +23,8 @@ Visual node-DAG editor: typed nodes (prompt groups; instruction/few-shot/history
 - `Views/GraphView.swift` · `Views/GraphCanvas.swift` · `Views/NodeInspector.swift` — canvas + inspector UI.
 - `Engines/GraphEngine.swift` — `@Observable` view-model (graph state, transform, selection, mutation API).
 - `Models/GraphCore.swift` — `GraphDef`/`GraphNode`/`GraphEdge` + node kinds; `Storage.swift` persists `GraphModel`.
-- `Core/GraphExecutor.swift` (topo-sort + per-node dispatch + live FM calls) · `Core/GraphValidator.swift` (pre-run checks) · `Core/GraphMigration.swift` (legacy-format migration).
+- `Core/GraphExecutor.swift` (topo-sort + per-node dispatch + live FM calls; emits an `ExecTrace` per run → Run History; `run(_:row:)` injects a batch row at a dataset-bound Input) · `Core/GraphValidator.swift` (pre-run checks) · `Core/GraphMigration.swift` (legacy-format migration).
+- `Core/GraphBatchRunner.swift` — **batch lane**: bind an Input to a dataset (`source: .dataset`) and the toolbar's "Run dataset" fans the graph over every row → one `ExperimentModel` (shows in the Lab). Reuses `GraphExecutor.run(_:row:)` + the `RunResult.asRunResultData()` bridge (graph run → `RunModel`). *(Phase 1 of the [[graph-batch-compare-plan]]; Compare group = Phase 2.)*
 
 ### Datasets tab — curation
 - `Views/DatasetsView.swift` — master–detail manager over the shared store: list datasets (both tasks), CRUD `ExampleModel`s, create/rename/duplicate/delete `DatasetModel`s. `ExampleEditorSheet` switches form on task (`Gloss.Input`/`Roleplay.Input`/`RunInput`). Reference-free — examples carry inputs only (expected outputs = roadmap).

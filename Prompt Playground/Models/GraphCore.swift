@@ -155,7 +155,9 @@ struct InputPayload: Codable, Equatable, Sendable {
     var source: InputSource = .staticLiteral
     var statics: [String: String] = [:]   // STATIC: literal {{var}} → value
     var jsonLiteral: String = ""           // JSON: an object whose top-level scalar keys become {{vars}}
-    var datasetID: UUID? = nil             // v2: bind a DatasetModel row (eval seam)
+    var datasetID: UUID? = nil             // DATASET: bound DatasetModel; each row feeds the wired {{vars}}
+    var datasetColumns: [String]? = nil    // the bound dataset's variable names, denormalized so the node's
+                                           // output ports are wireable without store access (Optional → old graphs decode)
     var rowIndex: Int? = nil               // v2: which row when previewing a dynamic source
 }
 
@@ -273,7 +275,8 @@ extension GraphNode {
         switch p.source {
         case .staticLiteral: return p.statics.keys.sorted()
         case .json:          return GraphJSON.topLevelKeys(p.jsonLiteral)
-        default:             return []                        // v2 sources: ports come from the bound source
+        case .dataset:       return p.datasetColumns ?? []     // columns of the bound dataset (set on bind)
+        default:             return []                         // csv/excel: ports come from the bound source (v2)
         }
     }
 
