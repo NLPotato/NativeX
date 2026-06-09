@@ -150,8 +150,8 @@ enum GraphExecutor {
             let pairs = (node.fewshot?.shots ?? []).filter { !$0.user.isEmpty || !$0.assistant.isEmpty }
             return ["fewshot": pairs.map { "User: \($0.user)\nAssistant: \($0.assistant)" }.joined(separator: "\n\n")]
 
-        case .guided, .tool:
-            return [:]   // metadata blocks — no dataflow output; assembled directly from the payload
+        case .guided, .tool, .compare:
+            return [:]   // metadata / reference nodes — no dataflow output (Compare runs via GraphCompareRunner)
 
         case .nativeAPI, .hook:
             guard let hook = node.hook else { return [:] }

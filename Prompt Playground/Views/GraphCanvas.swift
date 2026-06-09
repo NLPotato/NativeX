@@ -28,6 +28,7 @@ func kindTint(_ kind: NodeKind) -> Color {
     case .nativeAPI:   return .mint
     case .hook:        return .brown
     case .fm:          return .pink
+    case .compare:     return .yellow
     }
 }
 
@@ -362,6 +363,7 @@ private struct NodeCardView: View {
         case .nativeAPI, .hook: return node.hook?.op.displayName ?? node.kind.label
         case .fm:          return node.fm?.config.sampling.label ?? "default"
         case .promptGroup: return "prompt"
+        case .compare:     return "\(node.compare?.laneGroupIDs.count ?? 0) lane(s)"
         }
     }
 

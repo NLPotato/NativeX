@@ -509,6 +509,7 @@ final class GraphEngine {
         case .nativeAPI:   return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words", params: ["format": "numbered"])
         case .hook:        return .hook(op: .script, inputVar: "input", outputVar: "result", params: ["timeout": "30"])
         case .fm:          return .fm()
+        case .compare:     return .compare()
         }
     }
 
@@ -556,6 +557,38 @@ final class GraphEngine {
         g.edges = [
             GraphEdge(fromNodeID: input.id, outputKey: "input",  toNodeID: current.id, inputPort: "input"),
             GraphEdge(fromNodeID: group.id, outputKey: "prompt", toNodeID: fm.id,      inputPort: "prompt"),
+        ]
+        return g
+    }
+
+    /// A/B demo: ONE shared Input feeding TWO prompt groups (terse vs explainer) that differ only in their
+    /// instruction, each into its own FM, plus a Compare node already referencing both lanes. Select the
+    /// Compare node and "Run comparison" to see them side-by-side.
+    static func exampleCompare() -> GraphDef {
+        let input = GraphNode.input(source: .staticLiteral,
+                                    statics: ["input": "Translate to English and explain: „Der Hund schläft.“"],
+                                    x: 40, y: 320, title: "Shared input")
+
+        let groupA = GraphNode.promptGroup(title: "Prompt A · terse", x: 360, y: 40)
+        let instrA = GraphNode.instruction("You are a terse translator. Reply with ONLY the English translation, nothing else.",
+                                           groupID: groupA.id, x: 420, y: 120, title: "Instruction A")
+        let currentA = GraphNode.current(template: "{{input}}", groupID: groupA.id, x: 420, y: 280, title: "Current A")
+        let fmA = GraphNode.fm(x: 760, y: 120, title: "FM A")
+
+        let groupB = GraphNode.promptGroup(title: "Prompt B · explainer", x: 360, y: 420)
+        let instrB = GraphNode.instruction("You are a friendly German tutor. Give the English translation, then one short sentence on the grammar.",
+                                           groupID: groupB.id, x: 420, y: 500, title: "Instruction B")
+        let currentB = GraphNode.current(template: "{{input}}", groupID: groupB.id, x: 420, y: 660, title: "Current B")
+        let fmB = GraphNode.fm(x: 760, y: 500, title: "FM B")
+
+        let compare = GraphNode.compare(laneGroupIDs: [groupA.id, groupB.id], x: 1060, y: 300, title: "Compare A/B")
+
+        var g = GraphDef(nodes: [input, groupA, instrA, currentA, fmA, groupB, instrB, currentB, fmB, compare])
+        g.edges = [
+            GraphEdge(fromNodeID: input.id,  outputKey: "input",  toNodeID: currentA.id, inputPort: "input"),
+            GraphEdge(fromNodeID: input.id,  outputKey: "input",  toNodeID: currentB.id, inputPort: "input"),
+            GraphEdge(fromNodeID: groupA.id, outputKey: "prompt", toNodeID: fmA.id,       inputPort: "prompt"),
+            GraphEdge(fromNodeID: groupB.id, outputKey: "prompt", toNodeID: fmB.id,       inputPort: "prompt"),
         ]
         return g
     }

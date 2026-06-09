@@ -92,6 +92,7 @@ struct NodeInspector: View {
         case .input:            InputEditor(node: node, run: run)
         case .nativeAPI, .hook: HookEditor(node: node, engine: engine, nodeID: nodeID, run: run)
         case .fm:               FMEditor(node: node, engine: engine, run: run)
+        case .compare:          CompareEditor(engine: engine, node: node)
         }
     }
 }
@@ -347,6 +348,79 @@ private struct InputEditor: View {
     private var staticKeys: [String] { (node.input?.statics.keys).map { $0.sorted() } ?? [] }
     private func staticValue(_ key: String) -> Binding<String> {
         Binding(get: { node.input?.statics[key] ?? "" }, set: { node.input?.statics[key] = $0 })
+    }
+}
+
+// MARK: - Compare (A/B lanes)
+
+private struct CompareEditor: View {
+    let engine: GraphEngine
+    @Binding var node: GraphNode
+    @Environment(\.modelContext) private var context
+    @State private var runner = GraphCompareRunner()
+    @State private var showResult = false
+
+    private var groups: [GraphNode] { engine.graph.nodes.filter { $0.kind == .promptGroup } }
+    private var selectedIDs: [UUID] { node.compare?.laneGroupIDs ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.lg) {
+            DSSectionHeader("Lanes")
+            Text("Pick the Prompt groups to compare. Each runs on the same input — only the prompt varies.")
+                .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
+            if groups.isEmpty {
+                Text("No Prompt groups in this graph yet — add a couple, each feeding its own Foundation Model.")
+                    .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(groups) { g in
+                    Toggle(isOn: laneBinding(g.id)) {
+                        Text(g.title.isEmpty ? "Prompt" : g.title).font(.dsBody)
+                    }.toggleStyle(.checkbox)
+                }
+            }
+
+            Button { runComparison() } label: {
+                HStack(spacing: DS.Space.sm) {
+                    if runner.isRunning { ProgressView().controlSize(.small) }
+                    Text(runner.isRunning ? "Running…" : "Run comparison").frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(runner.isRunning || selectedIDs.count < 2)
+            .help(selectedIDs.count < 2 ? "Select at least two Prompt groups" : "Run the selected lanes side-by-side")
+
+            if let err = runner.error {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .font(.dsCaption).foregroundStyle(.dsDanger).fixedSize(horizontal: false, vertical: true)
+            }
+            if let outcome = runner.lastOutcome, !runner.isRunning {
+                Button { showResult = true } label: {
+                    Label("View result · \(outcome.lanes.count) lanes", systemImage: "rectangle.split.3x1")
+                }.buttonStyle(.link)
+            }
+        }
+        .sheet(isPresented: $showResult) {
+            if let outcome = runner.lastOutcome { CompareResultView(outcome: outcome) }
+        }
+    }
+
+    private func laneBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedIDs.contains(id) },
+            set: { on in
+                var ids = node.compare?.laneGroupIDs ?? []
+                if on { if !ids.contains(id) { ids.append(id) } } else { ids.removeAll { $0 == id } }
+                node.compare = ComparePayload(laneGroupIDs: ids)
+            })
+    }
+
+    private func runComparison() {
+        let ids = selectedIDs
+        Task {
+            await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: "Compare", context: context)
+            if runner.lastOutcome != nil { showResult = true }
+        }
     }
 }
 

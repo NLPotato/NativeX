@@ -19,12 +19,13 @@ Every output schema runs in one of **two lanes**:
 - **Dynamic** (prototyping, additive — never the default) — a UI-authored `SchemaDef` tree compiled at runtime to `DynamicGenerationSchema`. Run instantly, persist, or codegen back to a typed `@Generable` to promote it. See `docs/reference/foundation-models.md`.
 
 ### Graph tab — authoring (unifies the former single-shot + chat tabs)
-Visual node-DAG editor: typed nodes (prompt groups; instruction/few-shot/history/current-turn blocks; input sources; native-API/hook processors; FM calls) wired into a graph, topologically executed.
+Visual node-DAG editor: typed nodes (prompt groups; instruction/few-shot/history/current-turn blocks; input sources; native-API/hook processors; FM calls; compare nodes) wired into a graph, topologically executed.
 - `Views/GraphView.swift` · `Views/GraphCanvas.swift` · `Views/NodeInspector.swift` — canvas + inspector UI.
 - `Engines/GraphEngine.swift` — `@Observable` view-model (graph state, transform, selection, mutation API).
 - `Models/GraphCore.swift` — `GraphDef`/`GraphNode`/`GraphEdge` + node kinds; `Storage.swift` persists `GraphModel`.
 - `Core/GraphExecutor.swift` (topo-sort + per-node dispatch + live FM calls; emits an `ExecTrace` per run → Run History; `run(_:row:)` injects a batch row at a dataset-bound Input) · `Core/GraphValidator.swift` (pre-run checks) · `Core/GraphMigration.swift` (legacy-format migration).
-- `Core/GraphBatchRunner.swift` — **batch lane**: bind an Input to a dataset (`source: .dataset`) and the toolbar's "Run dataset" fans the graph over every row → one `ExperimentModel` (shows in the Lab). Reuses `GraphExecutor.run(_:row:)` + the `RunResult.asRunResultData()` bridge (graph run → `RunModel`). *(Phase 1 of the [[graph-batch-compare-plan]]; Compare group = Phase 2.)*
+- `Core/GraphBatchRunner.swift` — **batch lane**: bind an Input to a dataset (`source: .dataset`) and the toolbar's "Run dataset" fans the graph over every row → one `ExperimentModel` (shows in the Lab). Reuses `GraphExecutor.run(_:row:)` + the `RunResult.asRunResultData()` bridge (graph run → `RunModel`). *(Phase 1 of the [[graph-batch-compare-plan]].)*
+- `Core/GraphCompareRunner.swift` + `Views/CompareResultView.swift` — **compare lane**: a `.compare` node references N prompt groups (`ComparePayload.laneGroupIDs`, reference-collector — not nested); "Run comparison" (its inspector) executes the graph ONCE, collects each lane's FM output side-by-side, and persists M `ExperimentModel`s under one `sweepID` (a Lab sweep → `VariantStats` leaderboard). *(Phase 2 of [[graph-batch-compare-plan]]; "Insert example: compare" seeds a 2-lane A/B graph.)*
 
 ### Datasets tab — curation
 - `Views/DatasetsView.swift` — master–detail manager over the shared store: list datasets (both tasks), CRUD `ExampleModel`s, create/rename/duplicate/delete `DatasetModel`s. `ExampleEditorSheet` switches form on task (`Gloss.Input`/`Roleplay.Input`/`RunInput`). Reference-free — examples carry inputs only (expected outputs = roadmap).

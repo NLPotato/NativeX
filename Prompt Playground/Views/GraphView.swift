@@ -81,6 +81,8 @@ struct GraphView: View {
                 addItem(.nativeAPI, nil)
                 addItem(.hook, nil)
                 addItem(.fm, "m")
+                Divider()
+                addItem(.compare, nil)
             } label: { Label("Add", systemImage: "plus") }
             .menuStyle(.borderlessButton).fixedSize()
 
@@ -128,6 +130,9 @@ struct GraphView: View {
             Menu {
                 Button("Insert example: gloss") {
                     engine.graph = GraphEngine.exampleGloss(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
+                }
+                Button("Insert example: compare (A/B)") {
+                    engine.graph = GraphEngine.exampleCompare(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
                 }
                 Divider()
                 if saved.isEmpty {

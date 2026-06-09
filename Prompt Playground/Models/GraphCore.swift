@@ -44,6 +44,7 @@ enum NodeKind: String, Codable, CaseIterable, Sendable, Identifiable {
     case nativeAPI     // deterministic NaturalLanguage op (HookDef)
     case hook          // script / glue transform (HookDef)
     case fm            // the model call (sampling + execution)
+    case compare       // A/B: references prompt groups + runs them side-by-side (GraphCompareRunner)
 
     var id: String { rawValue }
 
@@ -60,6 +61,7 @@ enum NodeKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .nativeAPI:   return "Native API"
         case .hook:        return "Hook"
         case .fm:          return "Foundation Model"
+        case .compare:     return "Compare"
         }
     }
 
@@ -77,6 +79,7 @@ enum NodeKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .nativeAPI:   return "cpu"
         case .hook:        return "terminal"
         case .fm:          return "brain"
+        case .compare:     return "rectangle.split.3x1"
         }
     }
 
@@ -165,6 +168,12 @@ struct FMPayload: Codable, Equatable, Sendable {
     var config: GenConfig = GenConfig()    // sampling / decode params; schema lives on the guided block
 }
 
+/// A Compare node references the prompt groups to pit against each other (by id — NOT nested). Running it
+/// executes the graph once and collects each referenced lane's FM output side-by-side (GraphCompareRunner).
+struct ComparePayload: Codable, Equatable, Sendable {
+    var laneGroupIDs: [UUID] = []
+}
+
 // MARK: - Node
 
 struct GraphNode: Codable, Identifiable, Equatable, Sendable {
@@ -187,6 +196,7 @@ struct GraphNode: Codable, Identifiable, Equatable, Sendable {
     var input:       InputPayload?       = nil
     var hook:        HookDef?            = nil
     var fm:          FMPayload?          = nil
+    var compare:     ComparePayload?     = nil
 }
 
 extension GraphNode {
@@ -242,6 +252,10 @@ extension GraphNode {
                    title: String = "Foundation Model") -> GraphNode {
         GraphNode(kind: .fm, x: x, y: y, title: title, fm: FMPayload(config: config))
     }
+    static func compare(laneGroupIDs: [UUID] = [], x: Double = 0, y: Double = 0,
+                        title: String = "Compare") -> GraphNode {
+        GraphNode(kind: .compare, x: x, y: y, title: title, compare: ComparePayload(laneGroupIDs: laneGroupIDs))
+    }
 
     /// Output keys this node exposes as right-edge ports on the canvas. Blocks have NO output ports —
     /// the group reads them by `groupID` membership, not by an edge.
@@ -263,7 +277,7 @@ extension GraphNode {
         case .instruction:      return Vars.keys(in: instruction?.text ?? "")
         case .history:          return Vars.keys(in: history?.content ?? "")
         case .current:          return Vars.keys(in: current?.template ?? "")
-        case .fewshot, .guided, .tool, .input: return []
+        case .fewshot, .guided, .tool, .input, .compare: return []
         case .nativeAPI, .hook: return [hook?.inputVar ?? "input"]
         case .fm:               return ["prompt"]
         }
