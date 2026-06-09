@@ -87,22 +87,22 @@ final class ExperimentRunner {
             switch (task, schemaDef) {
             case (.gloss, nil):
                 guard let input = example.glossInput else { completed += 1; continue }
-                result = await GlossRunner.run(template: template.instructions, input: input, config: config)
+                result = await Gloss.Runner.run(template: template.instructions, input: input, config: config)
             case (.roleplay, nil):
                 guard let input = example.roleplayInput else { completed += 1; continue }
-                result = await RoleplayRunner.run(template: template.instructions, input: input, config: config)
-            case (.generic, nil):
-                guard let input = example.genericInput else { completed += 1; continue }
-                result = await GenericRunner.run(template: template.instructions, input: input, config: config, hooks: hooks, prewarm: prewarm)
+                result = await Roleplay.Runner.run(template: template.instructions, input: input, config: config)
+            case (.custom, nil):
+                guard let input = example.runInput else { completed += 1; continue }
+                result = await TextRunner.run(template: template.instructions, input: input, config: config, hooks: hooks, prewarm: prewarm)
             case (.gloss, let def?):
                 guard let input = example.glossInput else { completed += 1; continue }
-                result = await DynamicRunner.runGloss(template: template.instructions, input: input, def: def, config: config)
+                result = await Gloss.runDynamic(template: template.instructions, input: input, def: def, config: config)
             case (.roleplay, let def?):
                 guard let input = example.roleplayInput else { completed += 1; continue }
-                result = await DynamicRunner.runRoleplay(template: template.instructions, input: input, def: def, config: config)
-            case (.generic, let def?):
-                guard let input = example.genericInput else { completed += 1; continue }
-                result = await DynamicRunner.runGeneric(template: template.instructions, input: input, def: def, config: config, hooks: hooks, prewarm: prewarm)
+                result = await Roleplay.runDynamic(template: template.instructions, input: input, def: def, config: config)
+            case (.custom, let def?):
+                guard let input = example.runInput else { completed += 1; continue }
+                result = await DynamicRunner.run(template: template.instructions, input: input, def: def, config: config, hooks: hooks, prewarm: prewarm)
             }
 
             // Reference-based eval: score against the example's expected output when one is provided.

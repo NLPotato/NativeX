@@ -2,12 +2,10 @@
 //  Runners.swift
 //  Prompt Playground
 //
-//  Headless run engines used by the pipeline (the single-shot SwiftUI tabs keep their own
-//  view-model engines). Each runner opens a FRESH session, resolves the template, calls the
-//  model, and returns the output plus a fully-evaluated RunMetrics.
-//
-//  Gloss = one shot. Role-play = scripted multi-turn on ONE persistent session, so cumulative
-//  context growth (the 4096-token risk) is actually exercised and measured.
+//  The generic, task-agnostic run engine for the Lab (batch eval). `RunPipeline` is the shared
+//  execution spine — seed ctx → pre-hooks → resolve → STREAM the model (capturing TTFT + tokens/sec)
+//  → post-hooks → assemble a RunTrace + metrics — and `TextRunner` is the free-text entry point.
+//  Built-in test tasks (Gloss, Roleplay) bring their own runners under their namespaces.
 //
 
 import Foundation
@@ -15,11 +13,11 @@ import FoundationModels
 
 /// One headless run's payload, ready to persist as a RunModel.
 struct RunResultData {
-    var outputJSON: String       // last/only generated @Generable, pretty JSON
-    var turnsJSON: String?       // role-play: all turns, pretty JSON
+    var outputJSON: String       // last/only generated output, pretty JSON
+    var turnsJSON: String?       // multi-turn: all turns, pretty JSON
     var errorText: String?
     var metrics: RunMetrics
-    var trace: RunTrace? = nil   // staged pipeline view (generic lane); nil for the typed lanes
+    var trace: RunTrace? = nil   // staged pipeline view (generic lane); nil for the typed task lanes
 }
 
 func millis(since start: Date) -> Int { Int(Date().timeIntervalSince(start) * 1000) }
@@ -56,164 +54,23 @@ func classify(_ error: Error) -> (type: String, text: String) {
     return ("other", error.localizedDescription)
 }
 
-/// Resolve {{learning}}/{{native}} (canonical) plus legacy {{source}}/{{target}} aliases.
-func resolveGloss(_ template: String, _ input: GlossInput, proficiency: String = "intermediate") -> String {
-    template
-        .replacingOccurrences(of: "{{learning}}", with: input.learning)
-        .replacingOccurrences(of: "{{native}}", with: input.native)
-        .replacingOccurrences(of: "{{source}}", with: input.learning)
-        .replacingOccurrences(of: "{{target}}", with: input.native)
-        .replacingOccurrences(of: "{{proficiency}}", with: proficiency)
-}
-
-func resolveRoleplay(_ template: String, _ input: RoleplayInput) -> String {
-    template
-        .replacingOccurrences(of: "{{learning}}", with: input.learning)
-        .replacingOccurrences(of: "{{native}}", with: input.native)
-        .replacingOccurrences(of: "{{situation}}", with: input.situation)
-        .replacingOccurrences(of: "{{you}}", with: input.youRole)
-        .replacingOccurrences(of: "{{ai}}", with: input.aiRole)
-}
-
-/// Generic lane: resolve every {{name}} against the full variable map (no fixed token set).
-func resolveGeneric(_ template: String, _ vars: [String: String]) -> String {
+/// Resolve every `{{name}}` against the full variable map (no fixed token set).
+func resolveVars(_ template: String, _ vars: [String: String]) -> String {
     Vars.substitute(template, vars)
 }
 
-// MARK: - Gloss
-
-@MainActor
-enum GlossRunner {
-    static func run(template: String, input: GlossInput, config: GenConfig,
-                    proficiency: Proficiency = .intermediate) async -> RunResultData {
-        let resolved = resolveGloss(template, input, proficiency: proficiency.rawValue)
-        let start = Date()
-        do {
-            let out = try await GlossPipeline.run(sentence: input.sentence, learning: input.learning,
-                                                  proficiency: proficiency, instructions: resolved, config: config)
-            let latency = millis(since: start)
-            let outputJSON = prettyJSON(out.result)
-            let (gloss, lang) = Evaluators.gloss(out.result, sentence: input.sentence, native: input.native)
-            // GlossPipeline owns its sessions, so estimate context from the resolved text instead of a transcript.
-            let context = TokenEstimator.estimate(resolved + "\n" + out.promptSent + "\n" + outputJSON)
-            let metrics = RunMetrics(
-                decoded: true, errorType: nil, latencyMs: latency,
-                promptTokensEst: TokenEstimator.estimate(resolved + "\n" + out.promptSent),
-                outputTokensEst: TokenEstimator.estimate(outputJSON),
-                contextTokensEst: context, contextHeadroom: TokenEstimator.headroom(context),
-                onTargetLanguage: lang, gloss: gloss, roleplay: nil)
-            let trace = RunTrace(stages: [
-                .variables(ctx: ["sentence": input.sentence, "learning": input.learning, "native": input.native],
-                           keys: ["sentence", "learning", "native"]),
-                .prompt(instructions: resolved, prompt: out.promptSent, schemaInjected: true),
-                .model(output: outputJSON, ms: latency, ttftMs: nil, tokensPerSec: nil, schemaInjected: true),
-            ])
-            return RunResultData(outputJSON: outputJSON, turnsJSON: nil, errorText: nil, metrics: metrics, trace: trace)
-        } catch {
-            let (type, text) = classify(error)
-            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
-                                 metrics: .failure(type, latencyMs: millis(since: start)))
-        }
-    }
-}
-
-// MARK: - Role-play (scripted multi-turn)
-
-@MainActor
-enum RoleplayRunner {
-    static let opening = "Begin the conversation now: greet the user and speak first, in character."
-
-    static func run(template: String, input: RoleplayInput, config: GenConfig) async -> RunResultData {
-        let resolved = resolveRoleplay(template, input)
-        let session = LanguageModelSession(instructions: resolved)
-        let options = config.toOptions()
-
-        var turns: [RoleplayTurnGen] = []
-        var peakContext = 0
-        var hitLimit = false
-        var errorText: String?
-        var totalLatency = 0
-        var scriptIndex = 0
-        let maxTurns = max(1, input.maxTurns)
-        var stages: [RunTrace.Stage] = [
-            .variables(ctx: ["learning": input.learning, "native": input.native, "situation": input.situation,
-                             "you": input.youRole, "ai": input.aiRole],
-                       keys: ["learning", "native", "situation", "you", "ai"]),
-            .prompt(instructions: resolved, prompt: opening, schemaInjected: true),
-        ]
-
-        for turnNo in 0..<maxTurns {
-            // Decide the user's input for this turn.
-            let userText: String
-            if turnNo == 0 {
-                userText = opening
-            } else if scriptIndex < input.scriptedUserTurns.count {
-                userText = input.scriptedUserTurns[scriptIndex]
-                scriptIndex += 1
-            } else if let first = turns.last?.suggestions.first {
-                userText = first.text   // auto-advance using the model's own suggestion
-            } else {
-                break
-            }
-
-            let start = Date()
-            do {
-                let response = try await session.respond(to: userText,
-                                                         generating: RoleplayTurnGen.self,
-                                                         includeSchemaInPrompt: true,
-                                                         options: options)
-                let turnMs = millis(since: start)
-                totalLatency += turnMs
-                turns.append(response.content)
-                stages.append(.turn(turnNo + 1, body: prettyJSON(response.content), ms: turnMs))
-                peakContext = max(peakContext, TokenEstimator.estimate(session.transcript))
-            } catch let g as LanguageModelSession.GenerationError {
-                totalLatency += millis(since: start)
-                if case .exceededContextWindowSize = g {
-                    hitLimit = true
-                    errorText = "Context window exceeded at turn \(turnNo + 1)."
-                } else {
-                    errorText = "Generation failed: \(g.localizedDescription)"
-                }
-                break
-            } catch {
-                totalLatency += millis(since: start)
-                errorText = "Generation failed: \(error.localizedDescription)"
-                break
-            }
-        }
-
-        guard !turns.isEmpty else {
-            return RunResultData(outputJSON: "", turnsJSON: nil, errorText: errorText ?? "No turns produced.",
-                                 metrics: .failure(hitLimit ? "contextWindow" : "generation", latencyMs: totalLatency))
-        }
-
-        let (roleplay, lang) = Evaluators.roleplay(turns, learning: input.learning, native: input.native,
-                                                   peakContext: peakContext, hitLimit: hitLimit)
-        let turnsJSON = prettyJSON(turns)
-        let metrics = RunMetrics(
-            decoded: true, errorType: hitLimit ? "contextWindow" : nil, latencyMs: totalLatency,
-            promptTokensEst: TokenEstimator.estimate(resolved),
-            outputTokensEst: TokenEstimator.estimate(turnsJSON),
-            contextTokensEst: peakContext, contextHeadroom: TokenEstimator.headroom(peakContext),
-            onTargetLanguage: lang, gloss: nil, roleplay: roleplay)
-        return RunResultData(outputJSON: prettyJSON(turns[turns.count - 1]), turnsJSON: turnsJSON,
-                             errorText: errorText, metrics: metrics, trace: RunTrace(stages: stages))
-    }
-}
-
-// MARK: - Generic pipeline (the genericized Gloss tab's batch counterpart)
+// MARK: - Run pipeline (the generic execution spine)
 // One spine — seed ctx → pre-hooks → resolve → STREAM the model (capturing TTFT + tokens/sec) →
-// post-hooks → assemble a RunTrace + metrics — shared by the text lane (GenericRunner) and the
-// custom-schema lane (DynamicRunner.runGeneric), so a Lab run traces exactly like Single-shot.
+// post-hooks → assemble a RunTrace + metrics — shared by the text lane (TextRunner) and the
+// custom-schema lane (DynamicRunner.run), so a Lab run traces exactly like the Graph executor.
 
 @MainActor
-enum GenericPipeline {
+enum RunPipeline {
     /// The model call: given a session + resolved prompt, returns the raw output, TTFT, and gen time.
     /// Text lane streams a String; schema lane streams GeneratedContent snapshots (see callers).
     typealias Generate = (LanguageModelSession, String) async throws -> (raw: String, ttftMs: Int?, ms: Int)
 
-    static func run(template: String, input: GenericInput, config: GenConfig, hooks: HookPipelineDef,
+    static func run(template: String, input: RunInput, config: GenConfig, hooks: HookPipelineDef,
                     prewarm: Bool, schemaInjected: Bool, expectedLanguageKeys: [String],
                     generate: Generate) async -> RunResultData {
         var stages: [RunTrace.Stage] = []
@@ -228,8 +85,8 @@ enum GenericPipeline {
             stages.append(.preHook(hook, step))
         }
 
-        let resolvedInstructions = resolveGeneric(template, ctx)
-        let userPrompt = resolveGeneric(input.input, ctx)
+        let resolvedInstructions = resolveVars(template, ctx)
+        let userPrompt = resolveVars(input.input, ctx)
         stages.append(.prompt(instructions: resolvedInstructions, prompt: userPrompt, schemaInjected: schemaInjected))
 
         let session = LanguageModelSession(instructions: resolvedInstructions)
@@ -254,7 +111,7 @@ enum GenericPipeline {
             let contextTokens = TokenEstimator.estimate(session.transcript)
             let expected = expectedLanguageKeys.lazy.compactMap { ctx[$0] }.first ?? ""
             // Score the RAW model output (wrapped for the text lane so the JSON-leaf scorer can read it).
-            let metrics = GenericEvaluator.metrics(
+            let metrics = RunEvaluator.metrics(
                 json: schemaInjected ? raw : jsonWrap(raw), decoded: true, latencyMs: genMs,
                 resolvedPrompt: resolvedInstructions + "\n" + userPrompt,
                 expectedLanguage: expected, context: contextTokens, ttftMs: ttftMs, tokensPerSec: tps)
@@ -269,18 +126,18 @@ enum GenericPipeline {
         }
     }
 
-    /// Plain text has no JSON leaves to language-score; wrap it so GenericEvaluator can read one.
+    /// Plain text has no JSON leaves to language-score; wrap it so RunEvaluator can read one.
     static func jsonWrap(_ text: String) -> String { JSONCoder.encode(["output": text]) }
 }
 
 @MainActor
-enum GenericRunner {
+enum TextRunner {
     /// Free-text generic run: streams the String response (no schema).
-    static func run(template: String, input: GenericInput, config: GenConfig,
+    static func run(template: String, input: RunInput, config: GenConfig,
                     hooks: HookPipelineDef, prewarm: Bool = false) async -> RunResultData {
-        await GenericPipeline.run(template: template, input: input, config: config, hooks: hooks,
-                                  prewarm: prewarm, schemaInjected: false,
-                                  expectedLanguageKeys: ["learning", "native"]) { session, prompt in
+        await RunPipeline.run(template: template, input: input, config: config, hooks: hooks,
+                              prewarm: prewarm, schemaInjected: false,
+                              expectedLanguageKeys: ["learning", "native"]) { session, prompt in
             var raw = ""
             var ttft: Int? = nil
             let s = Date()

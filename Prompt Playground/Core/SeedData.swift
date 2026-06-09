@@ -39,8 +39,8 @@ enum SeedData {
         context.insert(PromptTemplateModel(task: .gloss, name: "Gloss baseline", version: 1,
             instructions: glossTemplate, notes: "Canonical {{learning}}/{{native}} gloss prompt."))
         context.insert(PromptTemplateModel(task: .roleplay, name: "Role-play baseline", version: 1,
-            instructions: defaultRoleplayInstructions, notes: "Mirrors wiekant's role-play scaffold."))
-        context.insert(PromptTemplateModel(task: .generic, name: "Gloss (hooks demo)", version: 1,
+            instructions: Roleplay.defaultInstructions, notes: "Mirrors wiekant's role-play scaffold."))
+        context.insert(PromptTemplateModel(task: .custom, name: "Gloss (hooks demo)", version: 1,
             instructions: genericGlossTemplate,
             notes: "Generic lane: a Tokenize pre-hook feeds {{words}} into the prompt.",
             hooks: HookPipelineDef(pre: [
@@ -81,7 +81,7 @@ enum SeedData {
 
     private static func glossExample(_ label: String, _ sentence: String,
                                      learning: String, native: String = "English") -> ExampleModel {
-        let input = GlossInput(sentence: sentence, learning: learning, native: native)
+        let input = Gloss.Input(sentence: sentence, learning: learning, native: native)
         return ExampleModel(task: .gloss, label: label, inputJSON: JSONCoder.encode(input))
     }
 
@@ -100,13 +100,13 @@ enum SeedData {
 
     private static func genericExample(_ label: String, _ sentence: String, learning: String,
                                        native: String = "English", proficiency: String = "intermediate") -> ExampleModel {
-        let input = GenericInput(input: sentence,
+        let input = RunInput(input: sentence,
                                  variables: ["learning": learning, "native": native, "proficiency": proficiency])
-        return ExampleModel(task: .generic, label: label, inputJSON: JSONCoder.encode(input))
+        return ExampleModel(task: .custom, label: label, inputJSON: JSONCoder.encode(input))
     }
 
     private static func genericDataset() -> DatasetModel {
-        DatasetModel(task: .generic, name: "Starter generic", examples: [
+        DatasetModel(task: .custom, name: "Starter generic", examples: [
             genericExample("DE · simple", "Der Hund schläft.", learning: "German"),
             genericExample("ES · café order", "Me gustaría pedir un café, por favor.", learning: "Spanish"),
             genericExample("FR · directions", "Où est la gare la plus proche ?", learning: "French"),
@@ -118,7 +118,7 @@ enum SeedData {
     private static func roleplayExample(_ label: String, learning: String, native: String = "English",
                                         situation: String, you: String, ai: String,
                                         script: [String], maxTurns: Int = 4) -> ExampleModel {
-        let input = RoleplayInput(learning: learning, native: native, situation: situation,
+        let input = Roleplay.Input(learning: learning, native: native, situation: situation,
                                   youRole: you, aiRole: ai, scriptedUserTurns: script, maxTurns: maxTurns)
         return ExampleModel(task: .roleplay, label: label, inputJSON: JSONCoder.encode(input))
     }

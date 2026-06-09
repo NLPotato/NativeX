@@ -287,9 +287,9 @@ struct PipelineView: View {
     /// Label stored when no dynamic schema is chosen (typed lanes name their @Generable; generic = text).
     private func builtinSchemaID(for task: TaskKind) -> String {
         switch task {
-        case .gloss:    return "GlossResultGen"
-        case .roleplay: return "RoleplayTurnGen"
-        case .generic:  return "Text"
+        case .gloss:    return "Gloss.Result"
+        case .roleplay: return "Roleplay.TurnGen"
+        case .custom:  return "Text"
         }
     }
 
@@ -403,7 +403,7 @@ struct PipelineView: View {
         let malformed = PromptAnalysis.malformedTokens(in: t.instructions)
         let unused = PromptAnalysis.unusedHookOutputs(instructions: t.instructions, input: "", hooks: hooks)
         let templateVars = PromptAnalysis.variableKeys(instructions: t.instructions, input: "", hooks: hooks)
-        let genInputs = (selectedDataset?.examples ?? []).compactMap { $0.genericInput }
+        let genInputs = (selectedDataset?.examples ?? []).compactMap { $0.runInput }
         let missing = genInputs.isEmpty ? [] :
             templateVars.filter { tok in genInputs.contains { !$0.variables.keys.contains(tok) } }
         let warnings = variantWarnings(malformed: malformed, unused: unused, missing: missing)

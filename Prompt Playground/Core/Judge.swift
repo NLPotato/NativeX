@@ -43,7 +43,7 @@ enum Judge {
             incorrect language, replies that break character, and weak or non-distinct practice suggestions. \
             Keep the rationale to one sentence.
             """
-        case .generic:
+        case .custom:
             instructions = """
             You are a strict evaluator of a model's output for the given input/instructions. Rate each \
             dimension as an integer 1–5, being critical: penalize outputs that ignore the instructions, are \

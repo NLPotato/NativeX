@@ -61,7 +61,7 @@ extension SchemaDef.Field: Equatable {
 // MARK: - Starter schemas (mirror the typed presets so Custom mode is runnable immediately)
 
 extension SchemaDef {
-    /// Mirrors `GlossResultGen` — a nested array-of-objects with a string-enum field.
+    /// Mirrors `Gloss.Result` — a nested array-of-objects with a string-enum field.
     static var glossLike: SchemaDef {
         let word = ObjectDef(name: "GlossWord", description: "One mined word from the sentence", fields: [
             Field(name: "surface", description: "Word exactly as it appears in the sentence", type: .string),
@@ -134,7 +134,7 @@ extension SchemaDef {
         ])
     }
 
-    /// Mirrors `RoleplayTurnGen` — nested object + bounded array-of-objects (the canonical nesting test).
+    /// Mirrors `Roleplay.TurnGen` — nested object + bounded array-of-objects (the canonical nesting test).
     static var roleplayLike: SchemaDef {
         let line = ObjectDef(name: "Line", description: "One spoken line of dialogue, with a translation", fields: [
             Field(name: "text", description: "What is said, in the learning language", type: .string),

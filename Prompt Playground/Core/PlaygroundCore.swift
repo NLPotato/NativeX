@@ -18,19 +18,20 @@ import SQLite3
 // MARK: - Task kind
 
 enum TaskKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case gloss, roleplay, generic
+    case gloss, roleplay
+    case custom = "generic"   // rawValue pinned to "generic" so already-saved datasets keep loading
     var id: String { rawValue }
     var label: String {
         switch self {
         case .gloss:    return "Gloss"
         case .roleplay: return "Role-play"
-        case .generic:  return "Run"
+        case .custom:   return "Custom"
         }
     }
 }
 
 // MARK: - Variable substitution (one source of truth for {{name}} placeholders)
-// Shared by the live tab engine, the headless runners, and the hook engine so detection and
+// Shared by the Graph executor, the headless runners, and the hook engine so detection and
 // substitution can never drift. A name is letters/digits/underscore; inner whitespace is trimmed.
 
 enum Vars {
@@ -52,9 +53,9 @@ enum Vars {
 }
 
 // MARK: - Prompt analysis (the mis-wiring guards, shared)
-// Pure, stateless versions of the authoring-time guards the Single-shot engine surfaces. One home so
-// the live tab engine, the Lab variant inspector, and the Datasets editor can't drift on what counts
-// as a user variable / a malformed token / an unused hook output.
+// Pure, stateless authoring-time guards. One home so the Graph executor, the Lab variant inspector,
+// and the Datasets editor can't drift on what counts as a user variable / a malformed token / an
+// unused hook output.
 
 enum PromptAnalysis {
     /// Keys the Prompt field provides (`{{prompt}}` canonical + legacy `{{input}}`) — never editable.

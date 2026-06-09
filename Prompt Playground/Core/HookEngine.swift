@@ -9,7 +9,7 @@
 //  not {{tokens}}); only a hook's params are var-substituted against the live context, which avoids
 //  any chicken-and-egg with the one prompt-substitution pass that happens after pre-hooks.
 //
-//  Shared by the Graph executor (GraphExecutor) and the headless Lab runners (GenericRunner /
+//  Shared by the Graph executor (GraphExecutor) and the headless Lab runners (TextRunner /
 //  DynamicRunner) so a saved pipeline replays identically. All ops use NaturalLanguage / Foundation
 //  — sandbox-safe and identical on macOS and iOS.
 //

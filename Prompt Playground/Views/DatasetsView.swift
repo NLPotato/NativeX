@@ -174,8 +174,8 @@ struct DatasetsView: View {
         case .roleplay:
             guard let r = ex.roleplayInput else { return "—" }
             return "\(r.situation)  ·  you: \(r.youRole) / ai: \(r.aiRole)  ·  \(r.learning)"
-        case .generic:
-            guard let g = ex.genericInput else { return "—" }
+        case .custom:
+            guard let g = ex.runInput else { return "—" }
             let vars = g.variables.isEmpty ? "" :
                 "  ·  " + g.variables.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
             return g.input + vars
@@ -211,7 +211,7 @@ struct DatasetsView: View {
         switch task {
         case .gloss:    color = .dsAccent
         case .roleplay: color = .dsInfo
-        case .generic:  color = .dsWarning
+        case .custom:  color = .dsWarning
         }
         return Text(task.label)
             .font(.dsMicro).fontWeight(.medium)
@@ -334,7 +334,7 @@ struct ExampleEditorSheet: View {
             return ![sentence, learning, native].contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         case .roleplay:
             return ![learning, native, situation, youRole, aiRole].contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        case .generic:
+        case .custom:
             return !genInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -356,7 +356,7 @@ struct ExampleEditorSheet: View {
                     switch task {
                     case .gloss: glossFields
                     case .roleplay: roleplayFields
-                    case .generic: genericFields
+                    case .custom: genericFields
                     }
                     expectedOutputField
                 }
@@ -514,8 +514,8 @@ struct ExampleEditorSheet: View {
                 youRole = r.youRole; aiRole = r.aiRole; maxTurns = r.maxTurns
                 turns = r.scriptedUserTurns.map { TurnDraft(text: $0) }
             }
-        case .generic:
-            if let g = e.genericInput {
+        case .custom:
+            if let g = e.runInput {
                 genInput = g.input
                 genVars = g.variables.map { VarDraft(key: $0.key, value: $0.value) }.sorted { $0.key < $1.key }
             }
@@ -527,17 +527,17 @@ struct ExampleEditorSheet: View {
         let json: String
         switch task {
         case .gloss:
-            json = JSONCoder.encode(GlossInput(sentence: sentence, learning: learning, native: native))
+            json = JSONCoder.encode(Gloss.Input(sentence: sentence, learning: learning, native: native))
         case .roleplay:
             let scripted = turns.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 .filter { !$0.isEmpty }
-            json = JSONCoder.encode(RoleplayInput(learning: learning, native: native, situation: situation,
+            json = JSONCoder.encode(Roleplay.Input(learning: learning, native: native, situation: situation,
                                                   youRole: youRole, aiRole: aiRole,
                                                   scriptedUserTurns: scripted, maxTurns: maxTurns))
-        case .generic:
+        case .custom:
             let vars = Dictionary(genVars.map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) }
                                         .filter { !$0.0.isEmpty }, uniquingKeysWith: { _, b in b })
-            json = JSONCoder.encode(GenericInput(input: genInput, variables: vars))
+            json = JSONCoder.encode(RunInput(input: genInput, variables: vars))
         }
         let reference = expectedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         switch target {

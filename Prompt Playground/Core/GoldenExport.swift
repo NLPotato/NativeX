@@ -31,7 +31,7 @@ struct GoldenExport: Codable {
     var stats: VariantStats
     var goldenReady: Bool
     var exemplars: [GoldenExemplar]
-    var scenarios: [RoleplayInput]?    // role-play only: the golden scenes to bundle
+    var scenarios: [Roleplay.Input]?    // role-play only: the golden scenes to bundle
 
     @MainActor
     static func build(from e: ExperimentModel) -> GoldenExport {
@@ -47,7 +47,7 @@ struct GoldenExport: Codable {
             manualRatings: e.runs.compactMap(\.manualRating),
             judgeScores: e.runs.compactMap { JSONCoder.decode(JudgeScore.self, $0.judgeJSON)?.mean })
         let scenarios = e.task == .roleplay
-            ? e.runs.compactMap { JSONCoder.decode(RoleplayInput.self, $0.inputJSON) }
+            ? e.runs.compactMap { JSONCoder.decode(Roleplay.Input.self, $0.inputJSON) }
             : nil
         return GoldenExport(
             task: e.task.rawValue,

@@ -13,31 +13,11 @@
 import Foundation
 
 // MARK: - Metric bundles
+// Built-in test tasks own their typed metric bundles (Gloss.Metrics / Roleplay.Metrics, in Tasks/);
+// RunMetrics carries them as optional fields so the generic scoring/aggregation can stay task-agnostic.
 
-struct GlossMetrics: Codable, Equatable, Sendable {
-    var wordCount: Int
-    var coverageRatio: Double           // share of source content words present among surfaces
-    var hallucinationRate: Double       // share of surfaces NOT found in the source (lower better)
-    var fieldCompleteness: Double       // required word fields + sentence translation non-empty
-    var dedupRate: Double               // share of duplicate surfaces (lower better)
-    var posPlausibility: Double         // share of partOfSpeech values in a known set
-    var sentenceTranslationPresent: Bool
-}
-
-struct RoleplayMetrics: Codable, Equatable, Sendable {
-    var turnCount: Int
-    var suggestionCountOK: Double        // share of turns with exactly two suggestions
-    var distinctSuggestions: Double      // share of turns whose suggestions are all distinct
-    var replyLangOK: Double              // reply detected as the learning language
-    var suggestionsLangOK: Double        // suggestions detected as the learning language
-    var translationPresent: Double       // share of lines carrying a non-empty native translation
-    var avgReplyChars: Double
-    var peakContextTokensEst: Int        // worst-case cumulative context across the turns
-    var hitContextLimit: Bool            // a turn failed with exceededContextWindowSize
-}
-
-/// Everything measured for one Run (one Example through one Variant). For role-play a Run is
-/// multi-turn and the role-play bundle aggregates across turns.
+/// Everything measured for one Run (one Example through one Variant). For multi-turn tasks a Run is
+/// multi-turn and the typed bundle aggregates across turns.
 struct RunMetrics: Codable, Equatable, Sendable {
     var decoded: Bool
     var errorType: String?               // nil | "contextWindow" | "guardrail" | "unsupportedLanguage" | "decoding" | "refusal" | …
@@ -47,8 +27,8 @@ struct RunMetrics: Codable, Equatable, Sendable {
     var contextTokensEst: Int            // cumulative context (peak, for role-play)
     var contextHeadroom: Int             // contextWindow - contextTokensEst
     var onTargetLanguage: Double?        // gloss: translations in native; role-play: lines in learning
-    var gloss: GlossMetrics?
-    var roleplay: RoleplayMetrics?
+    var gloss: Gloss.Metrics?
+    var roleplay: Roleplay.Metrics?
     // Streaming/perf (generic lane streams internally to capture these). All optional → old runs decode.
     var ttftMs: Int? = nil               // time to first streamed token
     var tokensPerSec: Double? = nil      // estimated output tokens / generation seconds
@@ -63,97 +43,22 @@ struct RunMetrics: Codable, Equatable, Sendable {
     }
 }
 
-// MARK: - Objective evaluators
+// MARK: - Shared evaluator helpers
+// Pure helpers the built-in task evaluators (Gloss.evaluate / Roleplay.evaluate, in Tasks/) reuse.
 
 enum Evaluators {
-    static let knownPOS: Set<String> = [
+    nonisolated static let knownPOS: Set<String> = [
         "noun", "proper noun", "propernoun", "verb", "adjective", "adverb", "pronoun",
         "preposition", "postposition", "adposition", "conjunction", "determiner", "article",
         "particle", "numeral", "number", "interjection", "auxiliary", "punctuation"
     ]
 
-    /// Gloss output metrics. `sentence` is the learning-language input; `native` is where
-    /// translations should land.
-    static func gloss(_ r: GlossResultGen, sentence: String, native: String) -> (GlossMetrics, onTargetLanguage: Double?) {
-        let surfaces = r.words
-            .map { normalize($0.surface) }
-            .filter { !$0.isEmpty }
-        let sourceWords = Set(LanguageTools.words(sentence).map(normalize).filter { !$0.isEmpty })
-        let surfaceSet = Set(surfaces)
-
-        let covered = sourceWords.isEmpty ? 0 : sourceWords.filter { surfaceSet.contains($0) }.count
-        let coverage = sourceWords.isEmpty ? 0 : Double(covered) / Double(sourceWords.count)
-
-        let hallucinated = surfaces.filter { !sourceWords.contains($0) }.count
-        let halluc = surfaces.isEmpty ? 0 : Double(hallucinated) / Double(surfaces.count)
-
-        let dedup = surfaces.isEmpty ? 0 : 1 - Double(surfaceSet.count) / Double(surfaces.count)
-
-        var checks = 0, passed = 0
-        for w in r.words {
-            // Skipped (already-known) words legitimately have a blank translation — don't penalize it.
-            var fields = [w.surface, w.lemma, w.partOfSpeech]
-            if w.glossed { fields.append(w.translation) }
-            for field in fields {
-                checks += 1
-                if !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { passed += 1 }
-            }
-        }
-        checks += 1
-        let transPresent = !r.sentenceTranslation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if transPresent { passed += 1 }
-        let completeness = checks == 0 ? 0 : Double(passed) / Double(checks)
-
-        let pos = r.words.map { $0.partOfSpeech.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
-        let posOK = pos.isEmpty ? 0 : Double(pos.filter { knownPOS.contains($0) }.count) / Double(pos.count)
-
-        // Language check: the generated translations must be in the native language.
-        var nativeTexts = [r.sentenceTranslation] + r.words.map(\.translation)
-        nativeTexts = nativeTexts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let lang = LanguageTools.matchScore(nativeTexts, expected: native)
-
-        let m = GlossMetrics(wordCount: r.words.count, coverageRatio: coverage,
-                             hallucinationRate: halluc, fieldCompleteness: completeness,
-                             dedupRate: dedup, posPlausibility: posOK,
-                             sentenceTranslationPresent: transPresent)
-        return (m, lang)
-    }
-
-    /// Role-play metrics aggregated across the turns of one Run. `peakContext` is the worst-case
-    /// estimated context size seen across turns; `hitLimit` flags an exceededContextWindowSize.
-    static func roleplay(_ turns: [RoleplayTurnGen], learning: String, native: String,
-                         peakContext: Int, hitLimit: Bool) -> (RoleplayMetrics, onTargetLanguage: Double?) {
-        let n = max(turns.count, 1)
-        let twoSuggestions = turns.filter { $0.suggestions.count == 2 }.count
-        let distinct = turns.filter { distinctTexts($0.suggestions.map(\.text)) }.count
-
-        let replies = turns.map(\.reply.text)
-        let suggestionTexts = turns.flatMap { $0.suggestions.map(\.text) }
-        let translations = (turns.map(\.reply.translation) + turns.flatMap { $0.suggestions.map(\.translation) })
-
-        let replyLang = LanguageTools.matchScore(replies, expected: learning) ?? 0
-        let suggLang = LanguageTools.matchScore(suggestionTexts, expected: learning) ?? 0
-        let transPresent = translations.isEmpty ? 0 :
-            Double(translations.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count) / Double(translations.count)
-        let avgReply = replies.isEmpty ? 0 : Double(replies.map(\.count).reduce(0, +)) / Double(replies.count)
-
-        let combinedLang = LanguageTools.matchScore(replies + suggestionTexts, expected: learning)
-
-        let m = RoleplayMetrics(turnCount: turns.count,
-                                suggestionCountOK: Double(twoSuggestions) / Double(n),
-                                distinctSuggestions: Double(distinct) / Double(n),
-                                replyLangOK: replyLang, suggestionsLangOK: suggLang,
-                                translationPresent: transPresent, avgReplyChars: avgReply,
-                                peakContextTokensEst: peakContext, hitContextLimit: hitLimit)
-        return (m, combinedLang)
-    }
-
-    private static func normalize(_ s: String) -> String {
+    nonisolated static func normalize(_ s: String) -> String {
         s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: .punctuationCharacters)
     }
 
-    private static func distinctTexts(_ texts: [String]) -> Bool {
+    nonisolated static func distinctTexts(_ texts: [String]) -> Bool {
         let cleaned = texts.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
         return Set(cleaned).count == cleaned.count
     }
@@ -165,7 +70,7 @@ enum Evaluators {
 // on-target language across every string leaf of the produced JSON. gloss/roleplay stay nil, which
 // VariantStats/GoldenThresholds already skip.
 
-enum GenericEvaluator {
+enum RunEvaluator {
     static func metrics(json: String, decoded: Bool, latencyMs: Int, resolvedPrompt: String,
                         expectedLanguage: String, context: Int,
                         ttftMs: Int? = nil, tokensPerSec: Double? = nil) -> RunMetrics {
@@ -363,7 +268,7 @@ enum GoldenThresholds {
             if let two = s.meanSuggestionCountOK { checks.append(check("2 suggestions ≥ 0.95", two >= 0.95, String(format: "%.2f", two))) }
             if let d = s.meanDistinct { checks.append(check("Distinct ≥ 0.95", d >= 0.95, String(format: "%.2f", d))) }
             if let cl = s.contextLimitRate { checks.append(check("No context overflow", cl <= 0.0001, String(format: "%.2f", cl))) }
-        case .generic:
+        case .custom:
             break   // no typed bundle — the universal decode/context/language checks above apply
         }
         if let r = s.meanManualRating { checks.append(check("Manual ≥ 4.0", r >= 4.0, String(format: "%.1f", r))) }

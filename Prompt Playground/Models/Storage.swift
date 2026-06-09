@@ -13,28 +13,10 @@ import SwiftData
 
 // MARK: - Example inputs (Codable; stored as JSON on ExampleModel / RunModel)
 
-struct GlossInput: Codable, Equatable, Sendable {
-    var sentence: String
-    var learning: String   // language being learned (the sentence's language)
-    var native: String     // user's language (translations land here)
-}
-
-struct RoleplayInput: Codable, Equatable, Sendable {
-    var learning: String
-    var native: String
-    var situation: String
-    var youRole: String
-    var aiRole: String
-    /// Drives the conversation headlessly. When exhausted (or empty) the runner auto-picks the
-    /// first suggestion so a scene can still be exercised over several turns.
-    var scriptedUserTurns: [String]
-    /// Total AI turns to generate, including the opening turn.
-    var maxTurns: Int
-}
-
-/// Generic-lane example: a free user message plus the `{{name}}` variable bindings the prompt and
-/// any pre-hooks consume. The home for hook-driven, schema-or-text runs authored in the Gloss tab.
-struct GenericInput: Codable, Equatable, Sendable {
+/// A generic run's example input: a free user message plus the `{{name}}` variable bindings the
+/// prompt and any pre-hooks consume. Built-in test tasks (Gloss, Roleplay) define their own Input
+/// shapes under their namespaces (Tasks/).
+struct RunInput: Codable, Equatable, Sendable {
     var input: String
     var variables: [String: String]
 }
@@ -141,15 +123,15 @@ final class ExampleModel {
     var createdAt: Date
     var taskRaw: String
     var label: String
-    var inputJSON: String          // GlossInput or RoleplayInput, encoded
+    var inputJSON: String          // Gloss.Input or Roleplay.Input, encoded
     var dataset: DatasetModel?
 
     var expectedOutput: String = ""   // optional ground-truth reference for reference-based scoring
 
     var task: TaskKind { TaskKind(rawValue: taskRaw) ?? .gloss }
-    var glossInput: GlossInput? { JSONCoder.decode(GlossInput.self, inputJSON) }
-    var roleplayInput: RoleplayInput? { JSONCoder.decode(RoleplayInput.self, inputJSON) }
-    var genericInput: GenericInput? { JSONCoder.decode(GenericInput.self, inputJSON) }
+    var glossInput: Gloss.Input? { JSONCoder.decode(Gloss.Input.self, inputJSON) }
+    var roleplayInput: Roleplay.Input? { JSONCoder.decode(Roleplay.Input.self, inputJSON) }
+    var runInput: RunInput? { JSONCoder.decode(RunInput.self, inputJSON) }
 
     init(task: TaskKind, label: String, inputJSON: String, expectedOutput: String = "") {
         self.id = UUID()
@@ -172,7 +154,7 @@ final class ExperimentModel {
     var templateName: String
     var templateVersion: Int
     var instructions: String       // raw template used (with {{vars}})
-    var schemaID: String           // which @Generable schema (e.g. "GlossResultGen")
+    var schemaID: String           // which @Generable schema (e.g. "Gloss.Result")
     var genConfigJSON: String      // GenConfig, encoded
     var hooksJSON: String = "{}"   // HookPipelineDef snapshot — which hooks produced this experiment
     var datasetName: String
@@ -209,7 +191,7 @@ final class ExperimentModel {
 }
 
 extension ExperimentModel {
-    /// nil = typed/built-in schema (schemaID is just a label like "GlossResultGen"); non-nil = the
+    /// nil = typed/built-in schema (schemaID is just a label like "Gloss.Result"); non-nil = the
     /// dynamic SchemaModel id to load and run via the dynamic path (schemaID == "dyn:<uuid>").
     var dynamicSchemaID: UUID? {
         schemaID.hasPrefix("dyn:") ? UUID(uuidString: String(schemaID.dropFirst(4))) : nil
