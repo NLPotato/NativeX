@@ -157,19 +157,40 @@ enum GraphExecutor {
 
     // MARK: Prompt-group assembly
 
-    /// Gather a group's resolved member outputs into one request spec. Blocks have already run (members →
-    /// group ordering is enforced in topoSort), so values come from `outputs`; the `?? substitute(...)`
-    /// fallback covers a member that produced nothing (e.g. empty template).
+    /// RESOLVED assembly (runtime): member text comes from run `outputs`; falls back to the raw template
+    /// for a member that produced nothing. Blocks have already run (members→group ordering in topoSort).
     static func assemble(groupID: UUID, graph: GraphDef, outputs: [UUID: [String: String]]) -> AssembledPrompt {
+        assemble(groupID: groupID, graph: graph) { n in
+            if let key = n.blockOutputKey, let v = outputs[n.id]?[key] { return v }
+            return rawText(of: n)
+        }
+    }
+
+    /// TEMPLATE assembly (pre-run): the RAW {{var}} templates in order, so the inspector can show the
+    /// full composed prompt — and how multiple instruction blocks concatenate — before any run.
+    static func assembleTemplate(groupID: UUID, graph: GraphDef) -> AssembledPrompt {
+        assemble(groupID: groupID, graph: graph) { rawText(of: $0) }
+    }
+
+    /// A block's raw template text (un-substituted), by kind.
+    private static func rawText(of n: GraphNode) -> String {
+        switch n.kind {
+        case .instruction: return n.instruction?.text ?? ""
+        case .history:     return n.history?.content ?? ""
+        case .current:     return n.current?.template ?? ""
+        default:           return ""
+        }
+    }
+
+    /// Shared gather. `text` returns each block's contribution (resolved or raw). Block order follows
+    /// VISIBLE canvas position (top→bottom): instructions → few-shot pairs → tool descriptions, then the
+    /// PAST history turns, then the current turn. What the user sees top-to-bottom is what gets sent.
+    private static func assemble(groupID: UUID, graph: GraphDef, text: (GraphNode) -> String) -> AssembledPrompt {
         let members = graph.members(of: groupID)
         var a = AssembledPrompt()
 
-        // Block order follows VISIBLE canvas position (top→bottom) — what the user sees is what is sent.
-        // Instructions: instruction blocks → few-shot pairs → tool descriptions, all as text.
-        var parts = members.filter { $0.kind == .instruction }
-            .sorted { $0.y < $1.y }
-            .map { outputs[$0.id]?["text"] ?? Vars.substitute($0.instruction?.text ?? "", [:]) }
-            .filter { !$0.isEmpty }
+        var parts = members.filter { $0.kind == .instruction }.sorted { $0.y < $1.y }
+            .map(text).filter { !$0.isEmpty }
 
         for fs in members.filter({ $0.kind == .fewshot }).sorted(by: { $0.y < $1.y }) {
             let pairs = (fs.fewshot?.shots ?? []).filter { !$0.user.isEmpty || !$0.assistant.isEmpty }
@@ -185,19 +206,10 @@ enum GraphExecutor {
         }
         a.instructionsText = parts.joined(separator: "\n\n")
 
-        // History: PAST turns, top→bottom.
-        a.history = members.filter { $0.kind == .history }
-            .sorted { $0.y < $1.y }
-            .map { n in
-                let role = n.history?.role ?? .human
-                let text = outputs[n.id]?["turn"] ?? Vars.substitute(n.history?.content ?? "", [:])
-                return (role, text)
-            }
+        a.history = members.filter { $0.kind == .history }.sorted { $0.y < $1.y }
+            .map { ($0.history?.role ?? .human, text($0)) }
 
-        // Current turn (the live `respond(to:)` prompt) + guided schema.
-        if let cur = members.first(where: { $0.kind == .current }) {
-            a.currentTurn = outputs[cur.id]?["currentturn"] ?? Vars.substitute(cur.current?.template ?? "", [:])
-        }
+        if let cur = members.first(where: { $0.kind == .current }) { a.currentTurn = text(cur) }
         a.guided = members.first { $0.kind == .guided }?.guided?.schemaDef
 
         var lines: [String] = []

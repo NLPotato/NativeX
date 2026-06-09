@@ -85,17 +85,18 @@ private struct PromptGroupEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            Text("A Prompt assembles its member blocks — instructions, few-shot, history, current turn, guided schema, tools — into one request. Drag blocks into the frame to add them; wire the frame’s output into a Foundation Model.")
+            Text("A Prompt assembles its member blocks into one request. Blocks concatenate top→bottom — drag a block up or down to reorder it. Wire the frame’s output into a Foundation Model.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
-            DSSectionHeader("Blocks")
-            let members = engine.members(of: node.id)
+            DSSectionHeader("Blocks — in order")
+            let members = engine.members(of: node.id).sorted { $0.y < $1.y }   // assembly order = top→bottom
             if members.isEmpty {
                 Text("No blocks yet. Add an Instruction / Current turn / Guided block and drag it into this frame.")
                     .font(.dsCaption).foregroundStyle(.tertiary)
             } else {
-                ForEach(members) { m in
+                ForEach(Array(members.enumerated()), id: \.element.id) { idx, m in
                     HStack(spacing: DS.Space.sm) {
+                        Text("\(idx + 1)").font(.dsMicro.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 14, alignment: .trailing)
                         Image(systemName: m.kind.symbol).font(.dsCaption).foregroundStyle(.secondary).frame(width: 18)
                         Text(m.kind.label).font(.dsCaption)
                         Spacer(minLength: 0)
@@ -104,20 +105,7 @@ private struct PromptGroupEditor: View {
                 }
             }
 
-            DSSectionHeader("Sent to the model")
-            assembled
-        }
-    }
-
-    @ViewBuilder private var assembled: some View {
-        let transcript = run?.outputs["_transcript"] ?? ""
-        let current = run?.outputs["_currentturn"] ?? ""
-        if !transcript.isEmpty || !current.isEmpty {
-            if !transcript.isEmpty { OutputBlock(title: "Transcript (instructions + history)", text: transcript) }
-            OutputBlock(title: "Current turn", text: current)
-        } else {
-            Text("Run the graph to see the assembled request this Prompt sends.")
-                .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            PromptCompositionView(engine: engine, groupID: node.id, run: run)
         }
     }
 }
@@ -395,26 +383,15 @@ private struct FMEditor: View {
     }
 
     @ViewBuilder private var promptTab: some View {
-        DSSectionHeader("Prompt")
         if let gid = engine.graph.promptGroupID(feeding: node.id), let g = engine.graph.node(gid) {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "rectangle.3.group").font(.dsMicro).foregroundStyle(.secondary)
                 Text("Fed by \(g.title.isEmpty ? "Prompt" : g.title)").font(.dsCaption).foregroundStyle(.secondary)
             }
+            PromptCompositionView(engine: engine, groupID: gid, run: run)
         } else {
-            Label("Not fed by a Prompt yet — drag a Prompt group’s output into this node.", systemImage: "exclamationmark.triangle")
+            Label("Not fed by a Prompt yet — drag a Prompt group’s output into this node’s prompt port.", systemImage: "exclamationmark.triangle")
                 .font(.dsCaption).foregroundStyle(.dsWarning).fixedSize(horizontal: false, vertical: true)
-        }
-
-        DSSectionHeader("Sent to the model")
-        let transcript = run?.outputs["_transcript"] ?? ""
-        let current = run?.outputs["_currentturn"] ?? ""
-        if !transcript.isEmpty || !current.isEmpty {
-            if !transcript.isEmpty { OutputBlock(title: "Transcript (instructions + history)", text: transcript) }
-            OutputBlock(title: "Current turn", text: current)
-        } else {
-            Text("Run the graph to see the resolved transcript + current turn sent to the model.")
-                .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -454,6 +431,33 @@ private struct FMEditor: View {
 }
 
 // MARK: - Shared blocks
+
+/// The full composed prompt for a group: the TEMPLATE (raw {{vars}}, in top→bottom order) shown always,
+/// plus the RESOLVED transcript/current turn after a run. Answers "show the full prompt template, in order".
+private struct PromptCompositionView: View {
+    let engine: GraphEngine
+    let groupID: UUID
+    let run: GraphNodeRun?
+
+    var body: some View {
+        let tmpl = GraphExecutor.assembleTemplate(groupID: groupID, graph: engine.graph)
+        VStack(alignment: .leading, spacing: DS.Space.lg) {
+            DSSectionHeader("Prompt template — in order")
+            if !tmpl.transcriptText.isEmpty {
+                OutputBlock(title: "Instructions + history", text: tmpl.transcriptText)
+            }
+            OutputBlock(title: "Current turn", text: tmpl.currentTurn.isEmpty ? "(no current-turn block)" : tmpl.currentTurn)
+
+            let resolvedT = run?.outputs["_transcript"] ?? ""
+            let resolvedC = run?.outputs["_currentturn"] ?? ""
+            if !resolvedT.isEmpty || !resolvedC.isEmpty {
+                DSSectionHeader("Resolved — last run")
+                if !resolvedT.isEmpty { OutputBlock(title: "Transcript", text: resolvedT) }
+                OutputBlock(title: "Current turn", text: resolvedC)
+            }
+        }
+    }
+}
 
 /// "port  ←  «SourceTitle» · outputKey" rows, with the carried value after a run.
 private struct WiredInputsView: View {
