@@ -3,9 +3,9 @@
 //  Prompt Playground
 //
 //  @Observable view-model for the Graph tab: owns the live GraphDef, canvas transform, selection,
-//  per-node run results, and the mutation API the canvas + inspector call. Mirrors the existing tab
-//  engine convention (PlaygroundModel / ChatModel) — instantiated as @State in the tab root, fed the
-//  shared modelContext for save/load. Execution is delegated to GraphExecutor.
+//  per-node run results, and the mutation API the canvas + inspector call. Instantiated as @State
+//  in the tab root and fed the shared modelContext for save/load. Execution is delegated to
+//  GraphExecutor.
 //
 //  NodeMetrics holds the analytic canvas geometry (fixed node width + per-port slot) so edge anchor
 //  points are computed algebraically — no PreferenceKey layout feedback, no one-frame lag.

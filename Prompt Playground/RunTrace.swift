@@ -2,12 +2,10 @@
 //  RunTrace.swift
 //  Prompt Playground
 //
-//  A serializable record of one headless run's pipeline — the persisted twin of the live
-//  Single-shot staged trace (PlaygroundModel.PipelineStage). The headless runners already compute
-//  every step (variables → pre-hooks → final prompt → model → post-hooks → final output); they now
-//  assemble a RunTrace from those steps so the Lab can render the SAME staged view per run instead
-//  of just the final output. One renderer (StageCardView) draws both the live and the persisted
-//  trace, so they can't drift.
+//  A serializable record of one headless run's pipeline. The headless runners compute every step
+//  (variables → pre-hooks → final prompt → model → post-hooks → final output) and assemble a
+//  RunTrace from those steps so the Lab can render a staged view per run instead of just the final
+//  output. StageCardView renders the persisted trace.
 //
 
 import SwiftUI
@@ -29,7 +27,7 @@ struct RunTrace: Codable, Equatable, Sendable {
     var isEmpty: Bool { stages.isEmpty }
 }
 
-// MARK: - Stage builders (mirror PlaygroundModel.run() so the Lab trace matches Single-shot)
+// MARK: - Stage builders (assemble the Lab's staged trace from the headless-runner steps)
 
 extension RunTrace.Stage {
     static func variables(ctx: [String: String], keys: [String]) -> Self {
@@ -95,7 +93,7 @@ extension RunTrace.Stage {
     }
 }
 
-// MARK: - Shared stage card (draws both the live PipelineStage and the persisted RunTrace.Stage)
+// MARK: - Stage card (draws the persisted RunTrace.Stage)
 
 struct StageCardView: View {
     enum Status { case running, ok, error }

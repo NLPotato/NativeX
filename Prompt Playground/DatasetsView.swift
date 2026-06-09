@@ -4,7 +4,7 @@
 //
 //  Dataset manager tab: the curate-your-test-set surface the Lab tab lacked. Lists every dataset
 //  (both tasks), shows the examples inside the selected one, and supports full CRUD on examples +
-//  datasets over the same SwiftData store the Lab reads. Writes mirror SaveToPipeline's pattern
+//  datasets over the same SwiftData store the Lab reads. Writes use the store's own pattern
 //  (ExampleModel(task:label:inputJSON:) + ex.dataset = … + context.insert). Reference-free for now
 //  — examples carry inputs only; expected/"gold" outputs are a roadmap item.
 //
