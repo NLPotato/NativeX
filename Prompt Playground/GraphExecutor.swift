@@ -36,6 +36,7 @@ enum GraphExecutor {
         case missingPromptGroup(node: String)
         case missingCurrentTurn(node: String)
         case dynamicInputUnsupported(source: String)
+        case notReady([String])   // pre-run validation (GraphValidator) — aborts before any node runs
 
         var errorDescription: String? {
             switch self {
@@ -44,6 +45,8 @@ enum GraphExecutor {
             case .missingPromptGroup(let n):      return "FM node “\(n)” isn’t fed by a Prompt. Wire a Prompt group’s output into its prompt port."
             case .missingCurrentTurn(let n):      return "Prompt feeding “\(n)” has no current turn. Add a Current-turn block (and an Input to fill it)."
             case .dynamicInputUnsupported(let s): return "Input source “\(s)” isn’t supported yet — use Static or JSON for now."
+            case .notReady(let msgs):             return msgs.count == 1 ? msgs[0]
+                                                       : "This graph isn’t ready to run:\n• " + msgs.joined(separator: "\n• ")
             }
         }
     }
@@ -76,6 +79,12 @@ enum GraphExecutor {
     static func run(_ graph: GraphDef, onUpdate: ((GraphNodeRun) -> Void)? = nil) async throws -> RunResult {
         guard !graph.nodes.isEmpty else { throw ExecError.emptyGraph }
         let order = try topoSort(graph)
+        // Fail FAST, before any node runs: a long pipeline shouldn't grind through hooks + tokenizers only
+        // to die at the final FM node for a missing current turn. Dedup messages (a shared group/block can
+        // surface the same problem twice) while preserving order.
+        var seen = Set<String>()
+        let problems = GraphValidator.issues(in: graph).map(\.message).filter { seen.insert($0).inserted }
+        if !problems.isEmpty { throw ExecError.notReady(problems) }
         var result = RunResult(order: order)
 
         for id in order {

@@ -200,6 +200,7 @@ private struct NodeCardView: View {
 
     private var run: GraphNodeRun? { engine.runs[node.id] }
     private var selected: Bool { engine.selection == node.id }
+    private var issues: [GraphIssue] { engine.issues(for: node.id) }   // pre-run structural problems
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -287,7 +288,12 @@ private struct NodeCardView: View {
         case .ok:      Image(systemName: "checkmark.circle.fill").foregroundStyle(.dsSuccess).font(.dsCaption)
         case .error:   Image(systemName: "xmark.octagon.fill").foregroundStyle(.dsDanger).font(.dsCaption)
         case .running: ProgressView().controlSize(.mini)
-        default:       EmptyView()
+        default:
+            // No run yet: surface a structural problem so the user fixes it BEFORE pressing Run.
+            if !issues.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.dsWarning).font(.dsCaption)
+                    .help(issues.map(\.message).joined(separator: "\n"))
+            }
         }
     }
 
@@ -339,6 +345,7 @@ private struct NodeCardView: View {
         if selected { return tint }                      // selected border carries the node's own hue
         switch run?.status {
         case .error: return .red.opacity(0.7)
+        case .none:  return issues.isEmpty ? .white.opacity(0.12) : Theme.gold.opacity(0.65)  // amber = not ready
         default:     return .white.opacity(0.12)         // success is shown by the status dot, not green chrome
         }
     }
@@ -477,6 +484,14 @@ private struct GroupFrameView: View {
 
     private var selected: Bool { engine.selection == group.id }
     private var dropping: Bool { engine.dropTargetGroup == group.id }
+    private var issues: [GraphIssue] { engine.issues(inGroup: group.id) }   // group + members, once it feeds an FM
+
+    /// Amber dashed frame when the Prompt is incomplete (no current turn / unbound var) — the at-a-glance
+    /// "this won't run" signal, so the failure is visible at authoring time, not only on Run.
+    private var frameStroke: Color {
+        if dropping || selected { return Theme.accent.opacity(0.85) }
+        return issues.isEmpty ? Theme.accent.opacity(0.30) : Theme.gold.opacity(0.6)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -485,7 +500,7 @@ private struct GroupFrameView: View {
                 // for the dashed frame + header, not a wash over everything. Greens only while dropping in.
                 .fill(dropping ? Theme.accent.opacity(0.10) : Color.white.opacity(0.025))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                    .strokeBorder(dropping || selected ? Theme.accent.opacity(0.85) : Theme.accent.opacity(0.30),
+                    .strokeBorder(frameStroke,
                                   style: StrokeStyle(lineWidth: dropping ? 2.5 : (selected ? 2 : 1.5), dash: [7, 5])))
                 .allowsHitTesting(false)               // body transparent → background pan falls through
             header
@@ -501,6 +516,10 @@ private struct GroupFrameView: View {
             Text(group.title.isEmpty ? "Prompt" : group.title).font(.dsLabel).lineLimit(1)
             Text("\(engine.members(of: group.id).count)").font(.dsMicro).foregroundStyle(.tertiary).monospacedDigit()
             if dropping { Text("add").font(.dsMicro.weight(.semibold)).foregroundStyle(Theme.accent) }
+            if !dropping, !issues.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill").font(.dsMicro).foregroundStyle(.dsWarning)
+                    .help(issues.map(\.message).joined(separator: "\n"))
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Space.md)

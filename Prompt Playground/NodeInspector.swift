@@ -20,6 +20,18 @@
 import SwiftUI
 import AppKit
 
+extension Binding {
+    /// A non-force-unwrapping projection of an optional payload binding, substituting `fallback` when nil.
+    /// Drop-in for the failable `Binding(_:)` init at the editor `if let` sites — same call shape, but the
+    /// returned binding's getter NEVER force-unwraps. That matters on teardown: when the selected node is
+    /// deleted, SwiftUI runs one final update on the outgoing editor while the payload is already nil, and a
+    /// Picker/TextEditor re-reading a force-unwrapping `Binding($node.payload)` traps (EXC_BREAKPOINT). The
+    /// returned optional is always `.some`, so the `if let` structure is preserved.
+    func defaulted<T>(_ fallback: T) -> Binding<T>? where Value == T? {
+        Binding<T>(get: { wrappedValue ?? fallback }, set: { wrappedValue = $0 })
+    }
+}
+
 struct NodeInspector: View {
     @Bindable var engine: GraphEngine
     let nodeID: UUID
@@ -127,7 +139,7 @@ private struct InstructionEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let i = Binding($node.instruction) {
+            if let i = $node.instruction.defaulted(InstructionPayload()) {
                 DSField(label: "Instruction", help: "System / persona / rules / NOT-TO-DO. {{vars}} are filled by wired Input or process nodes.") {
                     TextEditor(text: i.text).font(.dsCode).dsEditor(lines: 8)
                 }
@@ -146,7 +158,7 @@ private struct HistoryEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let h = Binding($node.history) {
+            if let h = $node.history.defaulted(HistoryPayload()) {
                 DSField(label: "Role") {
                     Picker("", selection: h.role) {
                         ForEach(TurnRole.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -170,7 +182,7 @@ private struct CurrentEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let c = Binding($node.current) {
+            if let c = $node.current.defaulted(CurrentTurnPayload()) {
                 DSField(label: "Template", help: "The live turn sent to the model (respond-to). Wire an Input node into its {{vars}}.") {
                     TextEditor(text: c.template).font(.dsCode).dsEditor(lines: 5)
                 }
@@ -190,7 +202,7 @@ private struct FewshotEditor: View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             Text("Demonstration pairs. Appended to the instructions as labeled User/Assistant examples — not real conversation history.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let f = Binding($node.fewshot) {
+            if let f = $node.fewshot.defaulted(FewShotPayload()) {
                 ForEach(f.shots) { $shot in
                     VStack(alignment: .leading, spacing: DS.Space.xs) {
                         TextField("user", text: $shot.user).dsTextField()
@@ -233,7 +245,7 @@ private struct ToolEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let t = Binding($node.tool) {
+            if let t = $node.tool.defaulted(ToolPayload()) {
                 DSField(label: "Name") { TextField("tool name", text: t.name).dsTextField() }
                 DSField(label: "Description") { TextEditor(text: t.toolDescription).font(.dsCode).dsEditor(lines: 4) }
             }
@@ -253,7 +265,7 @@ private struct InputEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let p = Binding($node.input) {
+            if let p = $node.input.defaulted(InputPayload()) {
                 DSField(label: "Source", help: "The variable values fed into a Prompt’s {{vars}}. Static + JSON run today; CSV/Excel/Dataset are coming.") {
                     Picker("", selection: p.source) {
                         ForEach(InputSource.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -318,7 +330,7 @@ private struct HookEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            if let h = Binding($node.hook) {
+            if let h = $node.hook.defaulted(HookDef(op: .textTransform)) {
                 DSField(label: "Operation") {
                     Picker("", selection: h.opRaw) {
                         ForEach(opChoices, id: \.self) { Text($0.displayName).tag($0.rawValue) }
@@ -395,6 +407,8 @@ private struct FMEditor: View {
 
     @ViewBuilder private var promptTab: some View {
         if let gid = engine.graph.promptGroupID(feeding: node.id), let g = engine.graph.node(gid) {
+            let problems = engine.fmIssues(node.id)
+            if !problems.isEmpty { readinessBanner(problems) }
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "rectangle.3.group").font(.dsMicro).foregroundStyle(.secondary)
                 Text("Fed by \(g.title.isEmpty ? "Prompt" : g.title)").font(.dsCaption).foregroundStyle(.secondary)
@@ -406,8 +420,25 @@ private struct FMEditor: View {
         }
     }
 
+    /// What's stopping this model from running, listed BEFORE you press Run (Run also aborts up front on
+    /// these — see GraphExecutor.run). Mirrors the amber canvas badges on the offending nodes.
+    private func readinessBanner(_ problems: [GraphIssue]) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Label("This Prompt isn’t ready to run", systemImage: "exclamationmark.triangle.fill")
+                .font(.dsCaption.weight(.semibold)).foregroundStyle(.dsWarning)
+            ForEach(problems) { p in
+                Text("• \(p.message)").font(.dsCaption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(DS.Space.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.gold.opacity(0.10), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(Theme.gold.opacity(0.35)))
+    }
+
     @ViewBuilder private var samplingTab: some View {
-        if let fm = Binding($node.fm) {
+        if let fm = $node.fm.defaulted(FMPayload()) {
             GenConfigControls(config: fm.config)
         }
         if let msg = ModelAvailability.message {

@@ -129,6 +129,18 @@ final class GraphEngine {
     var selectedNode: GraphNode? { selection.flatMap { sel in graph.nodes.first { $0.id == sel } } }
     var availabilityMessage: String? { ModelAvailability.message }
 
+    // MARK: Validation (live; recomputed as the graph changes — see GraphValidator)
+
+    /// Structural problems attributed to a single node (drives its canvas badge).
+    func issues(for id: UUID) -> [GraphIssue] { GraphValidator.issues(for: id, in: graph) }
+    /// All problems in one FM's pipeline (drives the FM inspector's warning section).
+    func fmIssues(_ id: UUID) -> [GraphIssue] { GraphValidator.issues(forFM: id, in: graph) }
+    /// Problems anywhere in a Prompt group — its own + its members' (so the frame reads "incomplete").
+    func issues(inGroup groupID: UUID) -> [GraphIssue] {
+        let ids = Set([groupID] + members(of: groupID).map(\.id))
+        return GraphValidator.issues(in: graph).filter { ids.contains($0.nodeID) }
+    }
+
     func index(_ id: UUID) -> Int? { graph.nodes.firstIndex { $0.id == id } }
 
     // MARK: Mutation
