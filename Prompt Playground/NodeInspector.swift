@@ -59,18 +59,17 @@ struct NodeInspector: View {
     }
 
     @ViewBuilder private func editor(_ node: Binding<GraphNode>) -> some View {
-        let wired = engine.incomingMap(nodeID)
         let run = engine.runs[nodeID]
         switch node.wrappedValue.kind {
         case .promptGroup:      PromptGroupEditor(node: node, engine: engine, run: run)
-        case .instruction:      InstructionEditor(node: node, wired: wired, run: run)
+        case .instruction:      InstructionEditor(node: node, engine: engine, nodeID: nodeID, run: run)
         case .fewshot:          FewshotEditor(node: node)
-        case .history:          HistoryEditor(node: node, wired: wired, run: run)
-        case .current:          CurrentEditor(node: node, wired: wired, run: run)
+        case .history:          HistoryEditor(node: node, engine: engine, nodeID: nodeID, run: run)
+        case .current:          CurrentEditor(node: node, engine: engine, nodeID: nodeID, run: run)
         case .guided:           GuidedEditor(node: node)
         case .tool:             ToolEditor(node: node)
         case .input:            InputEditor(node: node, run: run)
-        case .nativeAPI, .hook: HookEditor(node: node, wired: wired, run: run)
+        case .nativeAPI, .hook: HookEditor(node: node, engine: engine, nodeID: nodeID, run: run)
         case .fm:               FMEditor(node: node, engine: engine, run: run)
         }
     }
@@ -114,7 +113,8 @@ private struct PromptGroupEditor: View {
 
 private struct InstructionEditor: View {
     @Binding var node: GraphNode
-    let wired: [WiredInput]
+    let engine: GraphEngine
+    let nodeID: UUID
     let run: GraphNodeRun?
 
     var body: some View {
@@ -124,7 +124,7 @@ private struct InstructionEditor: View {
                     TextEditor(text: i.text).font(.dsCode).dsEditor(lines: 8)
                 }
             }
-            WiredInputsSection(wired: wired)
+            PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: run?.outputs["text"], status: run?.status, error: run?.error)
         }
     }
@@ -132,7 +132,8 @@ private struct InstructionEditor: View {
 
 private struct HistoryEditor: View {
     @Binding var node: GraphNode
-    let wired: [WiredInput]
+    let engine: GraphEngine
+    let nodeID: UUID
     let run: GraphNodeRun?
 
     var body: some View {
@@ -147,7 +148,7 @@ private struct HistoryEditor: View {
                     TextEditor(text: h.content).font(.dsCode).dsEditor(lines: 5)
                 }
             }
-            WiredInputsSection(wired: wired)
+            PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: run?.outputs["turn"], status: run?.status, error: run?.error)
         }
     }
@@ -155,7 +156,8 @@ private struct HistoryEditor: View {
 
 private struct CurrentEditor: View {
     @Binding var node: GraphNode
-    let wired: [WiredInput]
+    let engine: GraphEngine
+    let nodeID: UUID
     let run: GraphNodeRun?
 
     var body: some View {
@@ -165,7 +167,7 @@ private struct CurrentEditor: View {
                     TextEditor(text: c.template).font(.dsCode).dsEditor(lines: 5)
                 }
             }
-            WiredInputsSection(wired: wired)
+            PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: run?.outputs["currentturn"], status: run?.status, error: run?.error)
         }
     }
@@ -302,7 +304,8 @@ private struct InputEditor: View {
 
 private struct HookEditor: View {
     @Binding var node: GraphNode
-    let wired: [WiredInput]
+    let engine: GraphEngine
+    let nodeID: UUID
     let run: GraphNodeRun?
 
     var body: some View {
@@ -330,7 +333,7 @@ private struct HookEditor: View {
                     }
                 }
             }
-            WiredInputsSection(wired: wired)
+            PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: hookOutput, status: run?.status, error: run?.error)
         }
     }
@@ -459,30 +462,67 @@ private struct PromptCompositionView: View {
     }
 }
 
-/// "port  ←  «SourceTitle» · outputKey" rows, with the carried value after a run.
-private struct WiredInputsView: View {
-    let wired: [WiredInput]
+/// Per-input-port source picker: one row for each {{var}} the node consumes, with a dropdown to choose
+/// (or clear) which node feeds it — the inspector counterpart to dragging a wire on the canvas. Shows the
+/// carried value after a run. Only nodes that OUTPUT a value of the port's name are offered (the dataflow
+/// matches by name), so the list is always meaningful.
+private struct PortWiringSection: View {
+    let engine: GraphEngine
+    let nodeID: UUID
 
     var body: some View {
-        if wired.isEmpty {
-            Text("No inputs wired.").font(.dsCaption).foregroundStyle(.tertiary)
-        } else {
+        let ports = engine.graph.node(nodeID)?.inputPorts ?? []
+        if !ports.isEmpty {
+            DSSectionHeader("Inputs — wire each {{var}}")
             VStack(alignment: .leading, spacing: DS.Space.sm) {
-                ForEach(wired) { row($0) }
+                ForEach(ports, id: \.self) { PortWiringRow(engine: engine, nodeID: nodeID, port: $0) }
             }
         }
     }
+}
 
-    private func row(_ w: WiredInput) -> some View {
+private struct PortWiringRow: View {
+    let engine: GraphEngine
+    let nodeID: UUID
+    let port: String
+
+    var body: some View {
+        let producers = engine.producers(of: port, excluding: nodeID)
+        let current = engine.graph.incoming(nodeID).first { $0.inputPort == port }
+        let value = current.flatMap { engine.runs[$0.fromNodeID]?.outputs[$0.outputKey] }
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: DS.Space.xs) {
-                tag(w.port)
+                tag(port)
                 Image(systemName: "arrow.left").font(.dsMicro).foregroundStyle(.tertiary)
-                Text(w.sourceTitle).font(.dsCaption.weight(.medium)).lineLimit(1)
-                Text("·").foregroundStyle(.tertiary)
-                Text(w.sourceKey).font(.dsCode).foregroundStyle(.secondary).lineLimit(1)
+                Menu {
+                    if current != nil {
+                        Button(role: .destructive) { engine.unwire(to: nodeID, port: port) } label: {
+                            Label("Disconnect", systemImage: "xmark")
+                        }
+                        Divider()
+                    }
+                    if producers.isEmpty {
+                        Text("No node outputs “\(port)”")
+                    } else {
+                        ForEach(producers) { p in
+                            Button { engine.wire(from: p.id, key: port, to: nodeID, port: port) } label: {
+                                Label(engine.displayTitle(p.id), systemImage: p.kind.symbol)
+                            }
+                        }
+                    }
+                } label: {
+                    if let c = current {
+                        Text(engine.displayTitle(c.fromNodeID)).font(.dsCaption.weight(.medium)).lineLimit(1)
+                    } else {
+                        Text("Choose source…").font(.dsCaption).foregroundStyle(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                if current == nil && producers.isEmpty {
+                    Text("nothing outputs it yet").font(.dsMicro).foregroundStyle(.tertiary)
+                }
             }
-            if let v = w.value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+            if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
                 Text(v).font(.dsMicro).foregroundStyle(.secondary).lineLimit(2).padding(.leading, DS.Space.xs)
             }
         }
@@ -492,16 +532,6 @@ private struct WiredInputsView: View {
         Text(p).font(.dsCode).foregroundStyle(.primary)
             .padding(.horizontal, DS.Space.sm).padding(.vertical, 1)
             .background(.quaternary, in: Capsule())
-    }
-}
-
-private struct WiredInputsSection: View {
-    let wired: [WiredInput]
-    var body: some View {
-        if !wired.isEmpty {
-            DSSectionHeader("Wired inputs")
-            WiredInputsView(wired: wired)
-        }
     }
 }
 

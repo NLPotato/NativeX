@@ -27,7 +27,7 @@ struct GraphCanvas: View {
                 // Background — captures pan / zoom / deselect.
                 Color(nsColor: .underPageBackgroundColor)
                     .contentShape(Rectangle())
-                    .onTapGesture { engine.selection = nil; engine.selectedEdge = nil }
+                    .onTapGesture { engine.selection = nil; engine.selectedEdge = nil; engine.cancelArm() }
                     .gesture(pan)
                     .simultaneousGesture(zoom)
 
@@ -107,21 +107,29 @@ private struct EdgeLayer: View {
                     : (touchesSelection ? .color(Theme.accent.opacity(0.85)) : .color(.white.opacity(0.18)))
                 ctx.stroke(graphEdgeCurve(a, b), with: style, lineWidth: selected ? 3 : (touchesSelection ? 2.5 : 1.5))
             }
-            if let pf = engine.pendingFrom, let pt = engine.pendingPoint, let a = pendingAnchor(pf) {
-                ctx.stroke(graphEdgeCurve(a, pt),
-                           with: .color(Theme.accent.opacity(0.5)),
-                           style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            // Pending wire while dragging from a port — from an output (a→cursor) or an input (cursor→a).
+            if let pt = engine.pendingPoint {
+                let dash = StrokeStyle(lineWidth: 2, dash: [6, 4])
+                if let pf = engine.pendingFrom, let a = pendingOutputAnchor(pf) {
+                    ctx.stroke(graphEdgeCurve(a, pt), with: .color(Theme.accent.opacity(0.5)), style: dash)
+                } else if let pi = engine.pendingFromInput, let a = pendingInputAnchor(pi) {
+                    ctx.stroke(graphEdgeCurve(pt, a), with: .color(Theme.accent.opacity(0.5)), style: dash)
+                }
             }
         }
         .frame(width: 8000, height: 8000, alignment: .topLeading)
         .allowsHitTesting(false)
     }
 
-    private func pendingAnchor(_ pf: (node: UUID, key: String)) -> CGPoint? {
+    private func pendingOutputAnchor(_ pf: (node: UUID, key: String)) -> CGPoint? {
         guard let n = engine.graph.node(pf.node) else { return nil }
         if n.kind == .promptGroup { return engine.groupOutAnchor(n.id) }
         guard let j = n.outputKeys.firstIndex(of: pf.key) else { return nil }
         return NodeMetrics.outputAnchor(n, j)
+    }
+    private func pendingInputAnchor(_ pi: (node: UUID, port: String)) -> CGPoint? {
+        guard let n = engine.graph.node(pi.node), let i = n.inputPorts.firstIndex(of: pi.port) else { return nil }
+        return NodeMetrics.inputAnchor(n, i)
     }
 }
 
@@ -227,33 +235,35 @@ private struct NodeCardView: View {
         .padding(.horizontal, DS.Space.md)
     }
 
-    // Port dots positioned at the analytic anchors (in node-local coordinates).
+    // Port dots positioned at the analytic anchors (in node-local coordinates). Each dot is wireable two
+    // ways: DRAG it to the opposite port, or CLICK an output to arm then click a target input.
     private var portDots: some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, port in
-                // Neon fill on an INPUT dot means "this port is wired" — the one place accent earns its keep.
+                // Neon fill = wired. While a wire is armed (or this port is mid input-drag), every input
+                // lights up as a candidate target.
                 let wired = engine.isConnected(node.id, port: port)
-                portDot(filled: wired, tint: wired ? Theme.accent : .secondary)
+                let candidate = engine.armedFrom != nil
+                    || (engine.pendingFromInput?.node == node.id && engine.pendingFromInput?.port == port)
+                PortDotView(filled: wired, tint: wired ? Theme.accent : .secondary, active: candidate)
                     .position(x: 0, y: NodeMetrics.rowCenterY(i))
+                    .gesture(inputConnectGesture(port: port))
                     .onTapGesture(count: 2) { engine.snapshot(); engine.disconnect(to: node.id, port: port) }
-                    .help("Double-click to disconnect")
+                    .onTapGesture { if !engine.completeArm(to: node.id, port: port) { engine.selection = node.id } }
+                    .help(engine.armedFrom != nil
+                          ? "Click to connect the armed wire here"
+                          : "Drag to an output, or double-click to disconnect")
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
-                // Output dots are neutral chrome (you drag FROM them) — not a wiring signal.
-                portDot(filled: false, tint: .secondary)
+                let armed = engine.armedFrom.map { $0.node == node.id && $0.key == key } ?? false
+                PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary, active: armed)
                     .position(x: NodeMetrics.width, y: NodeMetrics.rowCenterY(j))
                     .gesture(connectGesture(key: key))
+                    .onTapGesture { engine.armOutput(node: node.id, key: key) }
+                    .help("Drag to an input, or click to arm then click a target input")
             }
         }
         .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
-    }
-
-    private func portDot(filled: Bool, tint: Color) -> some View {
-        Circle()
-            .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
-            .overlay(Circle().strokeBorder(tint, lineWidth: 1.5))
-            .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
-            .contentShape(Circle().inset(by: -6))
     }
 
     private var borderColor: Color {
@@ -331,6 +341,46 @@ private struct NodeCardView: View {
                 engine.pendingPoint = nil
             }
     }
+
+    /// Drag FROM an input port to an output port (the reverse direction). The fixed end is this input;
+    /// the moving end snaps to the nearest output on release.
+    private func inputConnectGesture(port: String) -> some Gesture {
+        DragGesture(coordinateSpace: .named(graphBoardSpace))
+            .onChanged { v in
+                engine.pendingFromInput = (node.id, port)
+                engine.pendingPoint = engine.toCanvas(v.location)
+            }
+            .onEnded { v in
+                let drop = engine.toCanvas(v.location)
+                if let hit = engine.hitOutputPort(near: drop) {
+                    engine.snapshot()
+                    engine.connect(from: hit.node, key: hit.key, to: node.id, port: port)
+                }
+                engine.pendingFromInput = nil
+                engine.pendingPoint = nil
+            }
+    }
+}
+
+/// A wireable port dot that grows on hover (or while it's an armed/candidate target). Gestures + taps
+/// are attached by the caller; this view owns only the visual + the (generous) hit shape.
+private struct PortDotView: View {
+    let filled: Bool
+    let tint: Color
+    let active: Bool
+    @State private var hover = false
+
+    var body: some View {
+        Circle()
+            .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
+            .overlay(Circle().strokeBorder(active ? Theme.accent : tint, lineWidth: active ? 2 : 1.5))
+            .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
+            .scaleEffect((hover || active) ? 1.4 : 1)
+            .contentShape(Circle().inset(by: -10))   // generous hit target (was -6)
+            .onHover { hover = $0 }
+            .animation(.easeOut(duration: 0.12), value: hover)
+            .animation(.easeOut(duration: 0.12), value: active)
+    }
 }
 
 // MARK: - Prompt group frame
@@ -395,10 +445,15 @@ private struct GroupFrameView: View {
             .fill(Theme.accent.opacity(0.9))
             .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
-            .contentShape(Circle().inset(by: -8))
+            .scaleEffect(armed ? 1.4 : 1)
+            .contentShape(Circle().inset(by: -10))
             .position(x: rect.width, y: rect.height / 2)
             .gesture(connectGesture)
+            .onTapGesture { engine.armOutput(node: group.id, key: "prompt") }
+            .help("Drag to an FM's prompt port, or click to arm then click the prompt port")
     }
+
+    private var armed: Bool { engine.armedFrom.map { $0.node == group.id && $0.key == "prompt" } ?? false }
 
     private var moveGesture: some Gesture {
         DragGesture(coordinateSpace: .named(graphBoardSpace))

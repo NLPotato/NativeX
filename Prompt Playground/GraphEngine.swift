@@ -13,16 +13,6 @@
 
 import SwiftUI
 
-// MARK: - Wired-input mapping (one resolved incoming edge, for the inspector's "Wired inputs" view)
-
-struct WiredInput: Identifiable {
-    var id: String { port }          // one edge per input port (enforced by GraphEngine.connect)
-    let port: String                 // input port on the selected node
-    let sourceTitle: String          // upstream node's display title
-    let sourceKey: String            // upstream output key feeding this port
-    let value: String?               // value carried on the edge after a run (nil before)
-}
-
 // MARK: - Canvas geometry (analytic anchors)
 
 enum NodeMetrics {
@@ -66,9 +56,16 @@ final class GraphEngine {
     // Persistence link (which saved GraphModel is open).
     var loadedID: UUID? = nil
 
-    // Transient wiring drag (canvas space).
+    // Transient wiring drag (canvas space). `pendingFrom` is a drag started at an OUTPUT port (seeking an
+    // input); `pendingFromInput` is a drag started at an INPUT port (seeking an output) — wires connect
+    // from either end. `pendingPoint` is the moving cursor end shared by both.
     var pendingFrom: (node: UUID, key: String)? = nil
+    var pendingFromInput: (node: UUID, port: String)? = nil
     var pendingPoint: CGPoint? = nil
+
+    // Click-to-connect: click an output port to ARM it, then click a target input to complete the wire
+    // (the no-precision alternative to dragging a 11pt dot).
+    var armedFrom: (node: UUID, key: String)? = nil
 
     // Group the block currently being dragged would drop into (drives the "+" frame affordance).
     var dropTargetGroup: UUID? = nil
@@ -218,6 +215,60 @@ final class GraphEngine {
         graph.edges.contains { $0.toNodeID == id && $0.inputPort == port }
     }
 
+    // MARK: Click-to-connect + manual source picking
+
+    /// Click an output port: arm it (or disarm if it's already the armed one).
+    func armOutput(node: UUID, key: String) {
+        if let a = armedFrom, a.node == node, a.key == key { armedFrom = nil }
+        else { armedFrom = (node, key); selection = node }
+    }
+    func cancelArm() { armedFrom = nil }
+
+    /// Click a target input while a wire is armed → complete it. Returns false if nothing was armed
+    /// (so the caller can fall back to selecting the node).
+    @discardableResult
+    func completeArm(to node: UUID, port: String) -> Bool {
+        guard let a = armedFrom, a.node != node else { return false }
+        snapshot()
+        connect(from: a.node, key: a.key, to: node, port: port)
+        armedFrom = nil
+        return true
+    }
+
+    /// Nodes that output a value named `port` (so they can feed that input by name) — drives the
+    /// inspector's per-port source dropdown.
+    func producers(of port: String, excluding id: UUID) -> [GraphNode] {
+        graph.nodes.filter { $0.id != id && $0.outputKeys.contains(port) }
+    }
+
+    /// Manual wire from the inspector: snapshot + connect (one edge per port).
+    func wire(from: UUID, key: String, to: UUID, port: String) { snapshot(); connect(from: from, key: key, to: to, port: port) }
+    /// Manual unwire from the inspector.
+    func unwire(to id: UUID, port: String) { snapshot(); disconnect(to: id, port: port) }
+
+    func displayTitle(_ id: UUID) -> String {
+        guard let n = graph.node(id) else { return "?" }
+        return n.title.isEmpty ? n.kind.label : n.title
+    }
+
+    /// Nearest OUTPUT port to a canvas point (for a wire dragged FROM an input port). A Prompt group's
+    /// single "prompt" output anchors at its frame's right edge.
+    func hitOutputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, key: String)? {
+        var best: (node: UUID, key: String, d: CGFloat)? = nil
+        func consider(_ id: UUID, _ key: String, _ a: CGPoint) {
+            let d = hypot(a.x - p.x, a.y - p.y)
+            if d < tolerance, best == nil || d < best!.d { best = (id, key, d) }
+        }
+        for n in graph.nodes {
+            if n.kind == .promptGroup {
+                if let a = groupOutAnchor(n.id) { consider(n.id, "prompt", a) }
+            } else {
+                for (j, key) in n.outputKeys.enumerated() { consider(n.id, key, NodeMetrics.outputAnchor(n, j)) }
+            }
+        }
+        return best.map { ($0.node, $0.key) }
+    }
+
     // MARK: Run
 
     func run() async {
@@ -252,17 +303,6 @@ final class GraphEngine {
     private var viewportCenter: CGPoint { CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2) }
     func zoomIn()  { zoom(by: 1.15, around: viewportCenter) }
     func zoomOut() { zoom(by: 1 / 1.15, around: viewportCenter) }
-
-    /// Each incoming edge resolved for display: which upstream node/output feeds an input port,
-    /// plus the value carried on that edge after a run. Drives the inspector's "Wired inputs" map.
-    func incomingMap(_ id: UUID) -> [WiredInput] {
-        graph.incoming(id).map { e in
-            let src = graph.node(e.fromNodeID)
-            let title = (src?.title.isEmpty == false ? src?.title : src?.kind.label) ?? "?"
-            return WiredInput(port: e.inputPort, sourceTitle: title,
-                              sourceKey: e.outputKey, value: runs[e.fromNodeID]?.outputs[e.outputKey])
-        }
-    }
 
     /// Nearest input port whose anchor is within tolerance of a canvas point (drag-to-connect drop).
     func hitInputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, port: String)? {
