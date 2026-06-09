@@ -82,13 +82,19 @@ struct GraphCanvas: View {
 
 // MARK: - Edges
 
-/// The S-curve between two canvas-space anchors. Shared by the renderer (EdgeLayer) and the hit layer
-/// (EdgeHitLayer) so the drawn wire and its click target are identical geometry.
+/// The S-curve between two canvas-space anchors (output `a` → input `b`). Shared by the renderer
+/// (EdgeLayer) and the hit layer (EdgeHitLayer) so the drawn wire and its click target are identical.
+///
+/// The control offset is horizontal (ports exit right / enter left). For FORWARD edges (target to the
+/// right) it's half the gap — a clean S. For BACKWARD edges (target dragged to the LEFT of the source)
+/// a linear offset overshoots and the curve tangles into a cusp; a sqrt-scaled offset (ReactFlow's
+/// trick) keeps the loop bounded and rounded instead. Fixes "the edge breaks when I move a node."
 func graphEdgeCurve(_ a: CGPoint, _ b: CGPoint) -> Path {
+    let dx = b.x - a.x
+    let offset: CGFloat = dx >= 0 ? dx * 0.5 : 6.25 * sqrt(-dx)   // 6.25 = curvature(0.25) × 25
     var p = Path()
-    let c = max(abs(b.x - a.x) * 0.5, 50)
     p.move(to: a)
-    p.addCurve(to: b, control1: CGPoint(x: a.x + c, y: a.y), control2: CGPoint(x: b.x - c, y: b.y))
+    p.addCurve(to: b, control1: CGPoint(x: a.x + offset, y: a.y), control2: CGPoint(x: b.x - offset, y: b.y))
     return p
 }
 
