@@ -288,8 +288,9 @@ private struct NodeCardView: View {
                 let s = moveStart ?? .zero
                 engine.move(node.id, to: CGPoint(x: s.x + v.translation.width / engine.scale,
                                                  y: s.y + v.translation.height / engine.scale))
+                if node.kind.isBlock { engine.updateGroupDrag(node.id) }   // live join/leave + "+" highlight
             }
-            .onEnded { _ in moveStart = nil; engine.reassignGroup(for: node.id) }   // join/leave a group by where it landed
+            .onEnded { _ in moveStart = nil; engine.endGroupDrag() }
     }
 
     private func connectGesture(key: String) -> some Gesture {
@@ -333,14 +334,15 @@ private struct GroupFrameView: View {
     @State private var dragStart: [UUID: CGPoint]? = nil
 
     private var selected: Bool { engine.selection == group.id }
+    private var dropping: Bool { engine.dropTargetGroup == group.id }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                .fill(Theme.accent.opacity(0.05))
+                .fill(Theme.accent.opacity(dropping ? 0.12 : 0.05))    // brighten while a block is dropping in
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                    .strokeBorder(selected ? Theme.accent.opacity(0.85) : Theme.accent.opacity(0.30),
-                                  style: StrokeStyle(lineWidth: selected ? 2 : 1.5, dash: [7, 5])))
+                    .strokeBorder(dropping || selected ? Theme.accent.opacity(0.85) : Theme.accent.opacity(0.30),
+                                  style: StrokeStyle(lineWidth: dropping ? 2.5 : (selected ? 2 : 1.5), dash: [7, 5])))
                 .allowsHitTesting(false)               // body transparent → background pan falls through
             header
             outPort
@@ -350,9 +352,11 @@ private struct GroupFrameView: View {
 
     private var header: some View {
         HStack(spacing: DS.Space.sm) {
-            Image(systemName: "rectangle.3.group").font(.dsCaption).foregroundStyle(.secondary)
+            Image(systemName: dropping ? "plus.circle.fill" : "rectangle.3.group")
+                .font(.dsCaption).foregroundStyle(dropping ? Theme.accent : .secondary)
             Text(group.title.isEmpty ? "Prompt" : group.title).font(.dsLabel).lineLimit(1)
             Text("\(engine.members(of: group.id).count)").font(.dsMicro).foregroundStyle(.tertiary).monospacedDigit()
+            if dropping { Text("add").font(.dsMicro.weight(.semibold)).foregroundStyle(Theme.accent) }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Space.md)

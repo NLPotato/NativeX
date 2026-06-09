@@ -69,6 +69,9 @@ final class GraphEngine {
     var pendingFrom: (node: UUID, key: String)? = nil
     var pendingPoint: CGPoint? = nil
 
+    // Group the block currently being dragged would drop into (drives the "+" frame affordance).
+    var dropTargetGroup: UUID? = nil
+
     init(graph: GraphDef = .init()) { self.graph = graph }
 
     var selectedNode: GraphNode? { selection.flatMap { sel in graph.nodes.first { $0.id == sel } } }
@@ -179,8 +182,10 @@ final class GraphEngine {
 
     // MARK: Prompt groups (the framed container; membership = groupID)
 
-    static let groupPad: CGFloat = 24
+    static let groupPad: CGFloat = 30      // breathing room around members (generous, so blocks aren't cramped)
     static let groupHeader: CGFloat = 30   // canvas-space header band reserved ABOVE the members
+    static let groupDropMargin: CGFloat = 80  // how far OUTSIDE the frame a block still counts as "in" — generous
+                                              // catch when dropping in, and hysteresis so repositioning never expels
 
     func members(of groupID: UUID) -> [GraphNode] { graph.nodes.filter { $0.groupID == groupID } }
 
@@ -211,14 +216,30 @@ final class GraphEngine {
         groupRect(groupID).map { CGPoint(x: $0.maxX, y: $0.midY) }
     }
 
-    /// Assign/clear a block's group by where its CENTER landed (called when a member drag ends).
-    func reassignGroup(for id: UUID) {
-        guard let i = index(id), graph.nodes[i].kind.isBlock else { return }
-        let n = graph.nodes[i]
-        let c = CGPoint(x: n.x + NodeMetrics.width / 2, y: n.y + NodeMetrics.height(n) / 2)
-        let hit = graph.nodes.first { $0.kind == .promptGroup && (rectExcluding(id, in: $0.id)?.contains(c) ?? false) }
-        graph.nodes[i].groupID = hit?.id
+    /// The GENEROUS drop zone of a group for a block being dragged — the frame (excluding that block,
+    /// so it can leave) expanded by a wide margin. The margin gives an easy catch when dropping a block
+    /// in, and hysteresis so nudging a member around inside never accidentally expels it.
+    func dropZone(_ groupID: UUID, excluding id: UUID) -> CGRect? {
+        rectExcluding(id, in: groupID).map { $0.insetBy(dx: -GraphEngine.groupDropMargin, dy: -GraphEngine.groupDropMargin) }
     }
+
+    /// Which group a dragged block belongs to, by its center. Sticky: a current member stays as long as
+    /// it's within its (generous) zone, so you can freely reposition it; only a clear drag-away leaves.
+    func dropGroup(for id: UUID) -> UUID? {
+        guard let n = graph.node(id), n.kind.isBlock else { return nil }
+        let c = CGPoint(x: n.x + NodeMetrics.width / 2, y: n.y + NodeMetrics.height(n) / 2)
+        if let g = n.groupID, dropZone(g, excluding: id)?.contains(c) ?? false { return g }
+        return graph.nodes.first { $0.kind == .promptGroup && (dropZone($0.id, excluding: id)?.contains(c) ?? false) }?.id
+    }
+
+    /// Live during a block drag: update its group membership + the highlighted drop target.
+    func updateGroupDrag(_ id: UUID) {
+        guard let i = index(id), graph.nodes[i].kind.isBlock else { return }
+        let target = dropGroup(for: id)
+        graph.nodes[i].groupID = target
+        dropTargetGroup = target
+    }
+    func endGroupDrag() { dropTargetGroup = nil }
 
     // MARK: Factories
 
