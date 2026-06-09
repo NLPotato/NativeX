@@ -365,6 +365,47 @@ final class GraphEngine {
         scale = newScale
     }
 
+    // MARK: Connected-node navigation (prev / next)
+
+    /// Nodes one hop away along the dataflow. Downstream follows outgoing edges (and a block → its group);
+    /// upstream follows incoming edges (and a group → its member blocks). De-duplicated, order preserved.
+    func adjacent(of id: UUID, downstream: Bool) -> [UUID] {
+        var r: [UUID] = []
+        if downstream {
+            r += graph.edges.filter { $0.fromNodeID == id }.map(\.toNodeID)
+            if let n = graph.node(id), n.kind.isBlock, let g = n.groupID { r.append(g) }
+        } else {
+            r += graph.edges.filter { $0.toNodeID == id }.map(\.fromNodeID)
+            if graph.node(id)?.kind == .promptGroup { r += members(of: id).map(\.id) }
+        }
+        var seen = Set<UUID>()
+        return r.filter { seen.insert($0).inserted }
+    }
+
+    func hasAdjacent(downstream: Bool) -> Bool {
+        guard let id = selection else { return false }
+        return !adjacent(of: id, downstream: downstream).isEmpty
+    }
+
+    /// Move the selection to a connected node (prev = upstream, next = downstream) and bring it into view.
+    func selectAdjacent(downstream: Bool) {
+        guard let id = selection else {
+            if let first = graph.nodes.first { selection = first.id; centerOn(first.id) }
+            return
+        }
+        guard let next = adjacent(of: id, downstream: downstream).first else { return }
+        selection = next
+        centerOn(next)
+    }
+
+    /// Pan (keeping zoom) so a node — or a Prompt group's frame — sits at the viewport center.
+    func centerOn(_ id: UUID) {
+        guard viewportSize.width > 0, let n = graph.node(id) else { return }
+        let rect = n.kind == .promptGroup ? (groupRect(id) ?? NodeMetrics.frame(n)) : NodeMetrics.frame(n)
+        offset = CGSize(width: viewportSize.width / 2 - rect.midX * scale,
+                        height: viewportSize.height / 2 - rect.midY * scale)
+    }
+
     /// Nearest input port whose anchor is within tolerance of a canvas point (drag-to-connect drop).
     func hitInputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, port: String)? {
         var best: (node: UUID, port: String, d: CGFloat)? = nil

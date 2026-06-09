@@ -55,6 +55,14 @@ struct NodeInspector: View {
                 TextField("Title", text: node.title).dsTextField()
                 Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
+            // Walk to a connected node (prev = upstream feeders, next = downstream consumers) and center it.
+            Button { engine.selectAdjacent(downstream: false) } label: { Image(systemName: "chevron.left") }
+                .keyboardShortcut("[", modifiers: .command).disabled(!engine.hasAdjacent(downstream: false))
+                .help("Previous connected node (⌘[)")
+            Button { engine.selectAdjacent(downstream: true) } label: { Image(systemName: "chevron.right") }
+                .keyboardShortcut("]", modifiers: .command).disabled(!engine.hasAdjacent(downstream: true))
+                .help("Next connected node (⌘])")
         }
     }
 
