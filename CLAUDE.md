@@ -10,7 +10,7 @@ Never add `#Playground { }` auto-run blocks — Xcode auto-runs them and crashes
 **Never invoke the `expo-libs` skill (or any Expo/JS-oriented skill) here.** This is a pure native Swift macOS app — no Expo, no JS bridge. That skill is irrelevant. For Foundation Models, `Core/GraphExecutor.swift` (live model calls) and `Tasks/Gloss.swift` (runtime `DynamicGenerationSchema`) are the canonical in-repo usage examples; `docs/reference/foundation-models.md` is the API-truths + gotchas reference.
 
 ## Structure (orientation for coding agents)
-`App/ContentView.swift` is a 3-tab `TabView` (seeds the store on first launch): **Graph** (authoring), **Datasets** (CRUD), **Lab** (batch eval). All share one SwiftData store (`Models/Storage.swift`) and one core layer (`Core/PlaygroundCore.swift`).
+`App/ContentView.swift` is a `NavigationSplitView` left menu (seeds the store on first launch) with two pages: **Playground** — the original 3-tab `TabView` (**Graph** authoring · **Datasets** CRUD · **Lab** batch eval) — and **Run History** (run log). All share one SwiftData store (`Models/Storage.swift`) and one core layer (`Core/PlaygroundCore.swift`).
 
 Files are grouped **by layer**: `App/` (entry + root tabs) · `Views/` (SwiftUI screens) · `Engines/` (`@Observable` view-models) · `Models/` (SwiftData + node tree) · `Core/` (generic, task-agnostic headless logic + shared utilities) · `Tasks/` (the built-in test tasks — `Gloss`, `Roleplay` — each a self-contained namespace) · `DesignSystem/` (tokens + theme). Swift has no folder-namespacing — folders are organizational only.
 
@@ -40,9 +40,14 @@ LangSmith-style layer that fans a prompt variant over a dataset and scores it.
 
 > **Naming:** the **Lab** tab was formerly "Pipeline" — only the tab label changed. Files (`Pipeline.swift`, `PipelineView.swift`) and the `PipelineView` type keep the `Pipeline` name in code. The generic `TaskKind.custom` lane persists as rawValue `"generic"` (pinned for back-compat).
 
+### Run History page — run log (observability)
+LangSmith-style trace log of live executions. Each Graph run persists one `TraceModel` (a grouped record of *consecutive* steps); each FM node logs as an **LLM record** (final prompt in blocks · token estimates · output · sampling · error), each native-API/hook node as a **step** (op · input · output).
+- `Views/RunHistoryView.swift` — master list of runs + per-step detail (reuses `StageCardView`).
+- `Core/ExecTrace.swift` — the plain `ExecTrace`/`ExecStep` the executor returns; `GraphView` maps it to `TraceModel`. Logs Graph executions; the Lab keeps its own experiment history (leaderboard).
+
 ### Shared layers
 - `Core/PlaygroundCore.swift` — `TaskKind`; `GenConfig` (Codable mirror of `GenerationOptions`); `TokenEstimator` (**Apple exposes NO token API** — ESTIMATED: CJK≈1 tok/char else ≈1 tok/4 chars; 4096 window per Apple TN3193); `LanguageTools` (NaturalLanguage); shared `prettyJSON`; `ModelAvailability`.
-- `Models/Storage.swift` — SwiftData models: `PromptTemplateModel` + `SchemaModel` (both versioned), `DatasetModel`→`ExampleModel`, `ExperimentModel`→`RunModel`, `GraphModel`, + `RunInput` (built-in tasks define their own `Gloss.Input`/`Roleplay.Input` in `Tasks/`); plus `JSONCoder`.
+- `Models/Storage.swift` — SwiftData models: `PromptTemplateModel` + `SchemaModel` (both versioned), `DatasetModel`→`ExampleModel`, `ExperimentModel`→`RunModel`, `GraphModel`, `TraceModel` (run history), + `RunInput` (built-in tasks define their own `Gloss.Input`/`Roleplay.Input` in `Tasks/`); plus `JSONCoder`.
 - `Core/HookEngine.swift` + `Core/HookDef.swift` — pre/post native-op hook pipeline (shared by the Graph executor + Lab runners).
 - `Core/RunTrace.swift` — persisted staged trace + the shared `StageCardView` renderer.
 - `Core/SeedData.swift` — first-launch templates + starter datasets (incl. Starbucks barista).

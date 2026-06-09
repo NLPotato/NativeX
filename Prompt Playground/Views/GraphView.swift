@@ -44,7 +44,7 @@ struct GraphView: View {
     private var toolbar: some View {
         HStack(spacing: DS.Space.md) {
             // Run is the ONE accent action at rest — everything else is neutral chrome.
-            Button { Task { await engine.run() } } label: {
+            Button { Task { await engine.run(); persistRun() } } label: {
                 Label(engine.isRunning ? "Running…" : "Run", systemImage: "play.fill")
             }
             .disabled(engine.isRunning || engine.graph.nodes.isEmpty)
@@ -160,6 +160,15 @@ struct GraphView: View {
             }
             .padding(DS.Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Log the just-finished execution to Run History (one TraceModel per run). Skipped when nothing
+    /// ran — a pre-run validation failure throws before any step, leaving no trace to persist.
+    private func persistRun() {
+        guard let trace = engine.lastTrace, !trace.steps.isEmpty else { return }
+        let name = saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph"
+        context.insert(TraceModel(trace, sourceName: name))
+        try? context.save()
     }
 
     private func save() {

@@ -80,6 +80,7 @@ final class GraphEngine {
     var isRunning = false
     var runs: [UUID: GraphNodeRun] = [:]
     var runError: String? = nil
+    var lastTrace: ExecTrace? = nil    // the most recent execution's trace — GraphView persists it to Run History
 
     // Persistence link (which saved GraphModel is open).
     var loadedID: UUID? = nil
@@ -329,10 +330,11 @@ final class GraphEngine {
 
     func run() async {
         guard !isRunning else { return }
-        isRunning = true; runError = nil; runs = [:]
+        isRunning = true; runError = nil; runs = [:]; lastTrace = nil
         defer { isRunning = false }
         do {
-            try await GraphExecutor.run(graph) { run in self.runs[run.nodeID] = run }
+            let result = try await GraphExecutor.run(graph) { run in self.runs[run.nodeID] = run }
+            lastTrace = result.trace
         } catch {
             runError = error.localizedDescription
         }

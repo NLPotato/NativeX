@@ -286,11 +286,38 @@ final class GraphModel {
     }
 }
 
+// MARK: - Run history (LangSmith-style trace log: one execution = one grouped record of consecutive steps)
+
+@Model
+final class TraceModel {
+    var id: UUID
+    var createdAt: Date            // when the run started ("run time")
+    var sourceKind: String         // "graph"
+    var sourceName: String         // which graph produced it
+    var totalMs: Int               // whole-execution wall-clock
+    var status: String             // "ok" | "error"
+    var llmRunCount: Int           // # of LLM calls in this execution (the consecutive runs, grouped here)
+    var stepsJSON: String          // [ExecStep], encoded — decoded on demand for the detail pane
+
+    var steps: [ExecStep] { JSONCoder.decode([ExecStep].self, stepsJSON) ?? [] }
+
+    init(_ trace: ExecTrace, sourceKind: String = "graph", sourceName: String) {
+        self.id = UUID()
+        self.createdAt = Date()
+        self.sourceKind = sourceKind
+        self.sourceName = sourceName
+        self.totalMs = trace.totalMs
+        self.status = trace.status
+        self.llmRunCount = trace.llmRunCount
+        self.stepsJSON = JSONCoder.encode(trace.steps)
+    }
+}
+
 // MARK: - Container
 
 enum PlaygroundStore {
     static let models: [any PersistentModel.Type] = [
         PromptTemplateModel.self, SchemaModel.self, DatasetModel.self, ExampleModel.self,
-        ExperimentModel.self, RunModel.self, GraphModel.self
+        ExperimentModel.self, RunModel.self, GraphModel.self, TraceModel.self
     ]
 }

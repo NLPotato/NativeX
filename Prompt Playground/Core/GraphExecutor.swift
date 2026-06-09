@@ -62,6 +62,7 @@ enum GraphExecutor {
         var outputs: [UUID: [String: String]] = [:]
         var runs: [UUID: GraphNodeRun] = [:]
         var order: [UUID] = []
+        var trace = ExecTrace()        // per-step records for the Run History page
     }
 
     /// The fully-assembled request a Prompt group feeds to an FM (also the source of the group/FM previews).
@@ -86,6 +87,7 @@ enum GraphExecutor {
         let problems = GraphValidator.issues(in: graph).map(\.message).filter { seen.insert($0).inserted }
         if !problems.isEmpty { throw ExecError.notReady(problems) }
         var result = RunResult(order: order)
+        let execStart = Date()
 
         for id in order {
             guard let node = graph.node(id) else { continue }
@@ -103,14 +105,20 @@ enum GraphExecutor {
             result.outputs[id] = run.outputs
             result.runs[id] = run
             onUpdate?(run)
+            if let step = traceStep(for: node, run: run, graph: graph, outputs: result.outputs) {
+                result.trace.steps.append(step)
+            }
         }
+        result.trace.totalMs = Int(Date().timeIntervalSince(execStart) * 1000)
+        result.trace.status = result.trace.steps.allSatisfy(\.ok) ? "ok" : "error"
         return result
     }
 
     // MARK: Per-node execution
 
     private static func execute(_ node: GraphNode, graph: GraphDef,
-                                outputs: [UUID: [String: String]]) async throws -> [String: String] {
+                                outputs: [UUID: [String: String]],
+                                row: [String: String]? = nil) async throws -> [String: String] {
         var ctx = inputContext(for: node, graph: graph, outputs: outputs)
 
         switch node.kind {
@@ -267,6 +275,45 @@ enum GraphExecutor {
             }
         }
         return Transcript(entries: entries)
+    }
+
+    // MARK: Run-history trace (per-step records)
+
+    /// Build a logged step for the nodes a user inspects in Run History: every FM node becomes an LLM
+    /// record (its final prompt re-assembled into instruction/history/current-turn blocks + estimated
+    /// tokens + output), and every native-API / hook node becomes a process step (op + resolved input +
+    /// output). Assembly/input/block nodes carry no record of their own — their text shows up inside the
+    /// LLM record they feed. Pure: re-derives from the run outputs, so the executor stays SwiftData-free.
+    private static func traceStep(for node: GraphNode, run: GraphNodeRun, graph: GraphDef,
+                                  outputs: [UUID: [String: String]]) -> ExecStep? {
+        switch node.kind {
+        case .fm:
+            let a = graph.promptGroupID(feeding: node.id)
+                .map { assemble(groupID: $0, graph: graph, outputs: outputs) } ?? AssembledPrompt()
+            let output = run.outputs["output"] ?? ""
+            let promptTok = TokenEstimator.estimate(a.instructionsText)
+                + a.history.reduce(0) { $0 + TokenEstimator.estimate($1.text) }
+                + TokenEstimator.estimate(a.currentTurn)
+            return .llm(id: run.id, title: node.title.isEmpty ? NodeKind.fm.label : node.title,
+                        ms: run.ms ?? 0, ok: run.status == .ok, error: run.error,
+                        instructions: a.instructionsText,
+                        history: a.history.map { TurnLine(role: $0.role.label, text: $0.text) },
+                        currentTurn: a.currentTurn, schemaName: a.guided?.typeName,
+                        output: run.status == .ok ? output : nil, configLabel: node.fm?.config.label,
+                        promptTokens: promptTok, outputTokens: TokenEstimator.estimate(output))
+
+        case .nativeAPI, .hook:
+            guard let hook = node.hook else { return nil }
+            let key = hook.outputVar.isEmpty ? "output" : hook.outputVar
+            let ctx = inputContext(for: node, graph: graph, outputs: outputs)
+            return .process(id: run.id, type: node.kind == .nativeAPI ? "api" : "hook",
+                            title: node.title.isEmpty ? hook.op.displayName : node.title,
+                            ms: run.ms ?? 0, ok: run.status == .ok, error: run.error,
+                            op: hook.op.displayName, input: ctx[hook.inputVar], output: run.outputs[key])
+
+        default:
+            return nil
+        }
     }
 
     // MARK: Topological sort
