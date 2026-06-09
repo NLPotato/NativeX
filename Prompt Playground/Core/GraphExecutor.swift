@@ -89,6 +89,12 @@ enum GraphExecutor {
         var seen = Set<String>()
         let problems = GraphValidator.issues(in: graph).map(\.message).filter { seen.insert($0).inserted }
         if !problems.isEmpty { throw ExecError.notReady(problems) }
+        // A dataset-bound Input is filled only by the batch runner (which passes `row`). On a plain run
+        // (row == nil) there's nothing to substitute, so abort up front instead of letting the FM generate
+        // on an unsubstituted turn and burn a generation. Batch passes a row, so it sails past this.
+        if row == nil, let ds = graph.nodes.first(where: { $0.kind == .input && $0.input?.source == .dataset }) {
+            throw ExecError.datasetNeedsBatch(node: ds.title.isEmpty ? ds.kind.label : ds.title)
+        }
         var result = RunResult(order: order)
         let execStart = Date()
 
@@ -374,7 +380,11 @@ extension GraphExecutor.RunResult {
                                  trace: trace.asRunTrace())
         }
         let output = llm.output ?? ""
-        let resolvedPrompt = [llm.instructions, llm.currentTurn].compactMap { $0 }.joined(separator: "\n")
+        // instr + history + current turn — mirrors the Run History promptTokens estimate (traceStep),
+        // so a batch run's promptTokensEst doesn't under-count vs the same run logged to Run History.
+        let historyText = (llm.history ?? []).map(\.text).joined(separator: "\n")
+        let resolvedPrompt = [llm.instructions, historyText, llm.currentTurn]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         let json = llm.schemaName != nil ? output : RunPipeline.jsonWrap(output)
         let metrics = llm.ok
             ? RunEvaluator.metrics(json: json, decoded: true, latencyMs: trace.totalMs,

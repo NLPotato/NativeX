@@ -195,7 +195,8 @@ struct GraphView: View {
     private func runOverDataset() {
         guard let ds = boundDataset else { return }
         let name = saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph"
-        Task { await batch.run(graph: engine.graph, dataset: ds, graphName: name, context: context) }
+        // Discard the returned ExperimentModel (non-Sendable) so the Task result stays Void — it's persisted; nothing here needs it.
+        Task { _ = await batch.run(graph: engine.graph, dataset: ds, graphName: name, context: context) }
     }
 
     /// Log the just-finished execution to Run History (one TraceModel per run). Skipped when nothing

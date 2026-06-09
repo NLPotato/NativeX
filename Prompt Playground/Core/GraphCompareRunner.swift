@@ -29,6 +29,7 @@ struct CompareLaneResult: Identifiable, Sendable {
 struct CompareOutcome: Sendable {
     var lanes: [CompareLaneResult]
     var sweepID: UUID
+    var skipped: [String] = []   // selected lanes with no FM wired — reported, never silently dropped
 }
 
 @MainActor
@@ -56,24 +57,27 @@ final class GraphCompareRunner {
 
         let sweepID = UUID()
         var lanes: [CompareLaneResult] = []
+        var skipped: [String] = []
 
         for groupID in laneGroupIDs {
             // Resolve the lane: a prompt group + the FM it feeds (the call that produced the output).
-            guard let group = graph.node(groupID), group.kind == .promptGroup,
-                  let fmID = graph.edges.first(where: {
-                      $0.fromNodeID == groupID && graph.node($0.toNodeID)?.kind == .fm
-                  })?.toNodeID
-            else { continue }
+            guard let group = graph.node(groupID), group.kind == .promptGroup else { continue }
+            let title = group.title.isEmpty ? "Lane" : group.title
+            // A selected lane with no group→FM edge can't run — surface it (the editor disables such
+            // lanes, so this only fires if the FM was deleted after selection). Don't silently drop it.
+            guard let fmID = graph.fmID(fedBy: groupID) else { skipped.append(title); continue }
 
             let nodeRun = result.runs[fmID]
             let output = result.outputs[fmID]?["output"] ?? ""
             let assembled = GraphExecutor.assemble(groupID: groupID, graph: graph, outputs: result.outputs)
-            let title = group.title.isEmpty ? "Lane" : group.title
             let ok = nodeRun?.status == .ok
             let ms = nodeRun?.ms ?? 0
 
-            // Score exactly like a Lab run (RunEvaluator) — same metrics whatever the front-end.
-            let resolvedPrompt = assembled.instructionsText + "\n" + assembled.currentTurn
+            // Score exactly like a Lab run (RunEvaluator) — same metrics whatever the front-end. Include the
+            // history turns so promptTokens matches the Run History estimate (which counts instr+history+turn).
+            let historyText = assembled.history.map(\.text).joined(separator: "\n")
+            let resolvedPrompt = [assembled.instructionsText, historyText, assembled.currentTurn]
+                .filter { !$0.isEmpty }.joined(separator: "\n")
             let json = assembled.guided != nil ? output : RunPipeline.jsonWrap(output)
             let contextTok = TokenEstimator.estimate(resolvedPrompt) + TokenEstimator.estimate(output)
             let metrics = ok
@@ -110,7 +114,7 @@ final class GraphCompareRunner {
         }
 
         try? context.save()
-        let outcome = CompareOutcome(lanes: lanes, sweepID: sweepID)
+        let outcome = CompareOutcome(lanes: lanes, sweepID: sweepID, skipped: skipped)
         lastOutcome = outcome
         return outcome
     }

@@ -357,11 +357,17 @@ private struct CompareEditor: View {
     let engine: GraphEngine
     @Binding var node: GraphNode
     @Environment(\.modelContext) private var context
+    @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
     @State private var runner = GraphCompareRunner()
     @State private var showResult = false
 
     private var groups: [GraphNode] { engine.graph.nodes.filter { $0.kind == .promptGroup } }
     private var selectedIDs: [UUID] { node.compare?.laneGroupIDs ?? [] }
+    /// A lane is runnable only if its group feeds a Foundation Model — otherwise it produces no output.
+    private func feedsFM(_ id: UUID) -> Bool { engine.graph.fmID(fedBy: id) != nil }
+    private var runnableSelected: [UUID] { selectedIDs.filter(feedsFM) }
+    /// The saved graph's name (matches the batch lane's label) — falls back when the graph is unsaved.
+    private var graphName: String { saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
@@ -374,9 +380,17 @@ private struct CompareEditor: View {
                     .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(groups) { g in
+                    let runnable = feedsFM(g.id)
                     Toggle(isOn: laneBinding(g.id)) {
-                        Text(g.title.isEmpty ? "Prompt" : g.title).font(.dsBody)
-                    }.toggleStyle(.checkbox)
+                        HStack(spacing: DS.Space.xs) {
+                            Text(g.title.isEmpty ? "Prompt" : g.title).font(.dsBody)
+                            if !runnable {
+                                Text("· no model wired").font(.dsMicro).foregroundStyle(.dsWarning)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(!runnable)   // an FM-less group can't run — can't be picked as a lane
                 }
             }
 
@@ -387,8 +401,8 @@ private struct CompareEditor: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(runner.isRunning || selectedIDs.count < 2)
-            .help(selectedIDs.count < 2 ? "Select at least two Prompt groups" : "Run the selected lanes side-by-side")
+            .disabled(runner.isRunning || runnableSelected.count < 2)
+            .help(runnableSelected.count < 2 ? "Select at least two Prompt groups, each feeding a Foundation Model" : "Run the selected lanes side-by-side")
 
             if let err = runner.error {
                 Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -417,8 +431,9 @@ private struct CompareEditor: View {
 
     private func runComparison() {
         let ids = selectedIDs
+        let name = graphName
         Task {
-            await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: "Compare", context: context)
+            await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: name, context: context)
             if runner.lastOutcome != nil { showResult = true }
         }
     }

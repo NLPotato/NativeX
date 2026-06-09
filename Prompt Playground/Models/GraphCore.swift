@@ -340,6 +340,12 @@ struct GraphDef: Codable, Equatable, Sendable {
     func promptGroupID(feeding fmID: UUID) -> UUID? {
         incoming(fmID).first { node($0.fromNodeID)?.kind == .promptGroup }?.fromNodeID
     }
+
+    /// The FM node a prompt group feeds (the target of its single outgoing `promptGroup → fm` edge).
+    /// Reverse of `promptGroupID(feeding:)` — `nil` ⇒ this group drives no model (an un-runnable lane).
+    func fmID(fedBy groupID: UUID) -> UUID? {
+        edges.first { $0.fromNodeID == groupID && node($0.toNodeID)?.kind == .fm }?.toNodeID
+    }
 }
 
 // MARK: - Per-node run result (drives the canvas status badges + inline trace)

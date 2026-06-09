@@ -25,6 +25,14 @@ struct CompareResultView: View {
             .padding(DS.Space.lg)
             Divider()
 
+            if !outcome.skipped.isEmpty {
+                Label("Skipped \(outcome.skipped.count) lane(s) with no Foundation Model wired: \(outcome.skipped.joined(separator: ", "))",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.dsCaption).foregroundStyle(.dsWarning)
+                    .padding(.horizontal, DS.Space.lg).padding(.top, DS.Space.sm)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if outcome.lanes.isEmpty {
                 Text("No lanes ran — each lane needs a Prompt group feeding a Foundation Model.")
                     .font(.dsBody).foregroundStyle(.secondary)

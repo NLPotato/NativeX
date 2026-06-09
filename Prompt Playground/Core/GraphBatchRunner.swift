@@ -33,6 +33,17 @@ final class GraphBatchRunner {
         isRunning = true; cancelRequested = false; completed = 0
         defer { isRunning = false; currentLabel = "" }
 
+        // Re-resolve the dataset Input's columns from the LIVE dataset. The node's `datasetColumns` is a
+        // bind-time snapshot (NodeInspector); a column added/removed since then would leave stale ports and
+        // drop the new value from each row (the executor emits only declared columns). Refresh on every run.
+        var graph = graph
+        let liveColumns = Set(dataset.examples.flatMap { $0.rowValues.keys }).sorted()
+        for i in graph.nodes.indices where graph.nodes[i].kind == .input
+            && graph.nodes[i].input?.source == .dataset
+            && graph.nodes[i].input?.datasetID == dataset.id {
+            graph.nodes[i].input?.datasetColumns = liveColumns
+        }
+
         let examples = dataset.examples.sorted { $0.createdAt < $1.createdAt }
         total = examples.count
 
