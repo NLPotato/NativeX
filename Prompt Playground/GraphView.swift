@@ -46,17 +46,31 @@ struct GraphView: View {
             .tint(Theme.accent)
 
             Menu {
-                ForEach(NodeKind.allCases) { kind in
-                    Button { engine.addNode(kind, at: engine.toCanvas(CGPoint(x: 240, y: 170))) } label: {
-                        Label(kind.label, systemImage: kind.symbol)
-                    }
-                }
+                addItem(.promptGroup, "p")
+                Menu {                                    // blocks nested UNDER Prompt — they belong to it
+                    addItem(.instruction, "i")
+                    addItem(.fewshot, nil)
+                    addItem(.history, nil)
+                    addItem(.current, "t")
+                    addItem(.guided, "g")
+                    addItem(.tool, nil)
+                } label: { Label("Prompt blocks", systemImage: "square.stack.3d.up") }
+                Divider()
+                addItem(.input, "n")
+                addItem(.nativeAPI, nil)
+                addItem(.hook, nil)
+                addItem(.fm, "m")
             } label: { Label("Add", systemImage: "plus") }
             .menuStyle(.borderlessButton).fixedSize()
+
+            Button { engine.autoWireMatchingVars() } label: { Label("Auto-wire", systemImage: "link") }
+                .keyboardShortcut("l", modifiers: .command)
+                .help("Connect every unwired {{var}} to a same-named output (e.g. an Input’s learning → a block’s {{learning}})")
 
             Button(role: .destructive) { engine.deleteSelection() } label: { Label("Delete", systemImage: "trash") }
                 .disabled(engine.selection == nil)
                 .tint(.red)
+                .keyboardShortcut(.delete, modifiers: [])   // ⌫ deletes the selected node
 
             Divider().frame(height: 16)
 
@@ -101,6 +115,15 @@ struct GraphView: View {
         .padding(.horizontal, DS.Space.lg).padding(.vertical, DS.Space.sm)
         .font(.dsCaption)
         .tint(.primary)   // neutral chrome by default; Run/Delete override above
+    }
+
+    /// One Add-menu item: adds the node at the viewport center, with an optional Figma-style single-key
+    /// shortcut (fires when no text field is focused — same as the menu button).
+    @ViewBuilder private func addItem(_ kind: NodeKind, _ key: Character?) -> some View {
+        let button = Button { engine.addNode(kind, at: engine.viewportCenterCanvas) } label: {
+            Label(kind.label, systemImage: kind.symbol)
+        }
+        if let key { button.keyboardShortcut(KeyEquivalent(key), modifiers: []) } else { button }
     }
 
     // MARK: Inspector

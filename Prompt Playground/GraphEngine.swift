@@ -83,11 +83,47 @@ final class GraphEngine {
 
     func addNode(_ kind: NodeKind, at p: CGPoint) {
         var n = GraphEngine.make(kind)
-        n.x = p.x; n.y = p.y
-        // Adding a block while a Prompt group is selected drops it straight into that group.
-        if kind.isBlock, let sel = selection, graph.node(sel)?.kind == .promptGroup { n.groupID = sel }
+        // Adding a block while a Prompt group is selected drops it INTO that group, stacked below its
+        // current members so it lands inside the frame (not floating at the cursor as an orphan member).
+        if kind.isBlock, let sel = selection, graph.node(sel)?.kind == .promptGroup {
+            n.groupID = sel
+            let ms = members(of: sel)
+            if let lowest = ms.map({ $0.y + NodeMetrics.height($0) }).max(), let x = ms.map(\.x).min() {
+                n.x = x; n.y = lowest + 20
+            } else if let g = graph.node(sel) {
+                n.x = g.x + 60; n.y = g.y + GraphEngine.groupHeader + 20
+            }
+        } else {
+            n.x = p.x; n.y = p.y
+        }
         graph.nodes.append(n)
         selection = n.id
+    }
+
+    /// Canvas-space point at the center of the visible pane — where menu/hotkey-added nodes appear.
+    var viewportCenterCanvas: CGPoint {
+        toCanvas(CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2))
+    }
+
+    /// Connect every UNCONNECTED input port `{{x}}` to a node that outputs `x` (preferring an Input node).
+    /// Variables match by NAME — the dominant LLM-ops case (an Input's `learning` → a block's `{{learning}}`,
+    /// a Prompt group's `prompt` → an FM's prompt port). Returns how many edges it made.
+    @discardableResult
+    func autoWireMatchingVars() -> Int {
+        var producers: [String: [GraphNode]] = [:]
+        for n in graph.nodes {
+            for key in n.outputKeys { producers[key, default: []].append(n) }
+        }
+        var made = 0
+        for n in graph.nodes {
+            for port in n.inputPorts where !isConnected(n.id, port: port) {
+                let cands = (producers[port] ?? []).filter { $0.id != n.id }
+                guard let pick = cands.first(where: { $0.kind == .input }) ?? cands.first else { continue }
+                connect(from: pick.id, key: port, to: n.id, port: port)
+                made += 1
+            }
+        }
+        return made
     }
 
     func deleteSelection() { if let id = selection { deleteNode(id) } }
