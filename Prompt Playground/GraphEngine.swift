@@ -51,6 +51,7 @@ enum NodeMetrics {
 final class GraphEngine {
     var graph: GraphDef
     var selection: UUID? = nil
+    var selectedEdge: UUID? = nil      // a wire selected on the canvas (⌫ / context-menu deletes it)
 
     // Canvas transform (canvas → board: p*scale + offset).
     var scale: CGFloat = 1
@@ -72,7 +73,33 @@ final class GraphEngine {
     // Group the block currently being dragged would drop into (drives the "+" frame affordance).
     var dropTargetGroup: UUID? = nil
 
+    // The window's UndoManager (injected by GraphView). Structural edits snapshot the whole GraphDef
+    // before mutating, so a single ⌘Z restores it. Kept out of @Observable tracking — it's plumbing.
+    @ObservationIgnored var undoManager: UndoManager?
+
     init(graph: GraphDef = .init()) { self.graph = graph }
+
+    // MARK: Undo (whole-graph snapshots)
+
+    /// Record the CURRENT graph as the state a subsequent ⌘Z restores, then mutate. Call once per
+    /// user-visible edit — at the START of a drag, or right before a discrete add/delete/connect.
+    /// Batch ops (auto-wire) call it once for the whole batch. Pan/zoom/selection never snapshot.
+    func snapshot() { registerUndoSnapshot(graph) }
+
+    private func registerUndoSnapshot(_ previous: GraphDef) {
+        guard let um = undoManager else { return }
+        um.registerUndo(withTarget: self) { engine in
+            let current = engine.graph          // capture for redo before we overwrite
+            engine.applyUndoState(previous)
+            engine.registerUndoSnapshot(current)  // registering inside undo turns it into redo
+        }
+    }
+
+    private func applyUndoState(_ g: GraphDef) {
+        graph = g
+        if let s = selection, graph.node(s) == nil { selection = nil }
+        if let e = selectedEdge, !graph.edges.contains(where: { $0.id == e }) { selectedEdge = nil }
+    }
 
     var selectedNode: GraphNode? { selection.flatMap { sel in graph.nodes.first { $0.id == sel } } }
     var availabilityMessage: String? { ModelAvailability.message }
@@ -82,6 +109,7 @@ final class GraphEngine {
     // MARK: Mutation
 
     func addNode(_ kind: NodeKind, at p: CGPoint) {
+        snapshot()
         var n = GraphEngine.make(kind)
         // Adding a block while a Prompt group is selected drops it INTO that group, stacked below its
         // current members so it lands inside the frame (not floating at the cursor as an orphan member).
@@ -110,6 +138,7 @@ final class GraphEngine {
     /// a Prompt group's `prompt` → an FM's prompt port). Returns how many edges it made.
     @discardableResult
     func autoWireMatchingVars() -> Int {
+        let before = graph                              // one undo step for the whole batch
         var producers: [String: [GraphNode]] = [:]
         for n in graph.nodes {
             for key in n.outputKeys { producers[key, default: []].append(n) }
@@ -123,12 +152,19 @@ final class GraphEngine {
                 made += 1
             }
         }
+        if made > 0 { registerUndoSnapshot(before) }
         return made
     }
 
     func deleteSelection() { if let id = selection { deleteNode(id) } }
 
     func deleteNode(_ id: UUID) {
+        snapshot()
+        // Deleting a Prompt group orphans its members (they keep groupID pointing at nothing) — clear it
+        // so they become free blocks again rather than invisible ghosts.
+        if graph.node(id)?.kind == .promptGroup {
+            for i in graph.nodes.indices where graph.nodes[i].groupID == id { graph.nodes[i].groupID = nil }
+        }
         graph.nodes.removeAll { $0.id == id }
         graph.edges.removeAll { $0.fromNodeID == id || $0.toNodeID == id }
         if selection == id { selection = nil }

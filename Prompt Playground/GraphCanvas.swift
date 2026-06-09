@@ -213,7 +213,7 @@ private struct NodeCardView: View {
                 let wired = engine.isConnected(node.id, port: port)
                 portDot(filled: wired, tint: wired ? Theme.accent : .secondary)
                     .position(x: 0, y: NodeMetrics.rowCenterY(i))
-                    .onTapGesture(count: 2) { engine.disconnect(to: node.id, port: port) }
+                    .onTapGesture(count: 2) { engine.snapshot(); engine.disconnect(to: node.id, port: port) }
                     .help("Double-click to disconnect")
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
@@ -284,7 +284,7 @@ private struct NodeCardView: View {
     private var moveGesture: some Gesture {
         DragGesture(coordinateSpace: .named(graphBoardSpace))
             .onChanged { v in
-                if moveStart == nil { moveStart = CGPoint(x: node.x, y: node.y); engine.selection = node.id }
+                if moveStart == nil { engine.snapshot(); moveStart = CGPoint(x: node.x, y: node.y); engine.selection = node.id }
                 let s = moveStart ?? .zero
                 engine.move(node.id, to: CGPoint(x: s.x + v.translation.width / engine.scale,
                                                  y: s.y + v.translation.height / engine.scale))
@@ -302,6 +302,7 @@ private struct NodeCardView: View {
             .onEnded { v in
                 let drop = engine.toCanvas(v.location)
                 if let hit = engine.hitInputPort(near: drop) {
+                    engine.snapshot()
                     engine.connect(from: node.id, key: key, to: hit.node, port: hit.port)
                 }
                 engine.pendingFrom = nil
@@ -381,6 +382,7 @@ private struct GroupFrameView: View {
         DragGesture(coordinateSpace: .named(graphBoardSpace))
             .onChanged { v in
                 if dragStart == nil {
+                    engine.snapshot()
                     var starts = Dictionary(uniqueKeysWithValues:
                         engine.members(of: group.id).map { ($0.id, CGPoint(x: $0.x, y: $0.y)) })
                     starts[group.id] = CGPoint(x: group.x, y: group.y)   // move the empty-fallback origin too
@@ -404,6 +406,7 @@ private struct GroupFrameView: View {
             .onEnded { v in
                 let drop = engine.toCanvas(v.location)
                 if let hit = engine.hitInputPort(near: drop) {
+                    engine.snapshot()
                     engine.connect(from: group.id, key: "prompt", to: hit.node, port: hit.port)
                 }
                 engine.pendingFrom = nil

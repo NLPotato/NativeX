@@ -13,6 +13,7 @@ import SwiftData
 
 struct GraphView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.undoManager) private var undoManager
     @State private var engine = GraphEngine(graph: GraphEngine.exampleGloss())
     @State private var showInspector = true
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
@@ -32,6 +33,10 @@ struct GraphView: View {
                     .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth, maxWidth: 540)
             }
         }
+        // The window's UndoManager drives ⌘Z/⌘⇧Z via the standard Edit menu; hand it to the engine so
+        // structural edits register snapshots against it (and text-field undo still wins while editing).
+        .onAppear { engine.undoManager = undoManager }
+        .onChange(of: undoManager) { _, um in engine.undoManager = um }
     }
 
     // MARK: Toolbar
@@ -71,6 +76,15 @@ struct GraphView: View {
                 .disabled(engine.selection == nil)
                 .tint(.red)
                 .keyboardShortcut(.delete, modifiers: [])   // ⌫ deletes the selected node
+
+            Divider().frame(height: 16)
+
+            // Undo / redo. ⌘Z / ⌘⇧Z arrive via the standard Edit menu (so text-field undo wins while
+            // editing); these buttons are the visible affordance and route to the same UndoManager.
+            Button { undoManager?.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                .disabled(!(undoManager?.canUndo ?? false)).help("Undo (⌘Z)")
+            Button { undoManager?.redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                .disabled(!(undoManager?.canRedo ?? false)).help("Redo (⌘⇧Z)")
 
             Divider().frame(height: 16)
 
