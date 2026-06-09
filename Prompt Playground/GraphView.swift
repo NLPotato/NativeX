@@ -95,7 +95,8 @@ struct GraphView: View {
                 .font(.dsMicro).foregroundStyle(.secondary).monospacedDigit().frame(width: 40)
             Button { engine.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
                 .keyboardShortcut("+", modifiers: .command).help("Zoom in")
-            Button { engine.scale = 1; engine.offset = .zero } label: { Label("Reset view", systemImage: "scope") }
+            Button { engine.fitToView() } label: { Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right") }
+                .keyboardShortcut("0", modifiers: .command).help("Fit graph to view (⌘0)")
 
             Spacer()
 

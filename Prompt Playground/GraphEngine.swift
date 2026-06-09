@@ -304,6 +304,23 @@ final class GraphEngine {
     func zoomIn()  { zoom(by: 1.15, around: viewportCenter) }
     func zoomOut() { zoom(by: 1 / 1.15, around: viewportCenter) }
 
+    /// Frame the whole graph: scale + offset so every node card and Prompt-group frame fits the viewport
+    /// with padding (capped at 100% so a tiny graph isn't blown up). Unlike "reset", this finds the work.
+    func fitToView() {
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
+        var rects = graph.nodes.filter { $0.kind != .promptGroup }.map(NodeMetrics.frame)
+        for g in graph.nodes where g.kind == .promptGroup { if let r = groupRect(g.id) { rects.append(r) } }
+        guard let first = rects.first else { return }
+        let content = rects.dropFirst().reduce(first) { $0.union($1) }
+        let pad: CGFloat = 60
+        let s = min(viewportSize.width / (content.width + pad * 2),
+                    viewportSize.height / (content.height + pad * 2))
+        let newScale = min(max(s, Self.zoomRange.lowerBound), 1)
+        offset = CGSize(width: viewportSize.width / 2 - content.midX * newScale,
+                        height: viewportSize.height / 2 - content.midY * newScale)
+        scale = newScale
+    }
+
     /// Nearest input port whose anchor is within tolerance of a canvas point (drag-to-connect drop).
     func hitInputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, port: String)? {
         var best: (node: UUID, port: String, d: CGFloat)? = nil
