@@ -27,14 +27,16 @@ struct GraphCanvas: View {
                 // Background — captures pan / zoom / deselect.
                 Color(nsColor: .underPageBackgroundColor)
                     .contentShape(Rectangle())
-                    .onTapGesture { engine.selection = nil }
+                    .onTapGesture { engine.selection = nil; engine.selectedEdge = nil }
                     .gesture(pan)
                     .simultaneousGesture(zoom)
 
-                // Scaled content layer (canvas space). Group frames paint FIRST (behind edges + cards).
+                // Scaled content layer (canvas space). Group frames paint FIRST (behind edges + cards),
+                // then wires, then the wire hit-targets, then the node cards (which win any overlap).
                 ZStack(alignment: .topLeading) {
                     GroupFrameLayer(engine: engine)
                     EdgeLayer(engine: engine)
+                    EdgeHitLayer(engine: engine)
                     ForEach(engine.graph.nodes.filter { $0.kind != .promptGroup }) { node in
                         NodeCardView(engine: engine, node: node)
                             .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
@@ -49,7 +51,7 @@ struct GraphCanvas: View {
             .clipped()
             .contentShape(Rectangle())
             .coordinateSpace(name: graphBoardSpace)
-            .onDeleteCommand { engine.deleteSelection() }
+            .onDeleteCommand { engine.deleteSelectionOrEdge() }
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
         }
     }
@@ -78,23 +80,35 @@ struct GraphCanvas: View {
 
 // MARK: - Edges
 
+/// The S-curve between two canvas-space anchors. Shared by the renderer (EdgeLayer) and the hit layer
+/// (EdgeHitLayer) so the drawn wire and its click target are identical geometry.
+func graphEdgeCurve(_ a: CGPoint, _ b: CGPoint) -> Path {
+    var p = Path()
+    let c = max(abs(b.x - a.x) * 0.5, 50)
+    p.move(to: a)
+    p.addCurve(to: b, control1: CGPoint(x: a.x + c, y: a.y), control2: CGPoint(x: b.x - c, y: b.y))
+    return p
+}
+
 private struct EdgeLayer: View {
     @Bindable var engine: GraphEngine
 
     var body: some View {
         Canvas { ctx, _ in
             for edge in engine.graph.edges {
-                guard let a = outAnchor(edge), let b = inAnchor(edge) else { continue }
-                // Edges are chrome (muted) except those touching the selected node — focus the topology
-                // around what you're editing rather than washing the whole board in accent.
+                guard let (a, b) = engine.edgeAnchors(edge) else { continue }
+                // A selected wire is the ONE bright edge; otherwise muted chrome, brightened a touch when
+                // it touches the selected node so the topology around what you're editing stands out.
+                let selected = engine.selectedEdge == edge.id
                 let touchesSelection = engine.selection != nil
                     && (edge.fromNodeID == engine.selection || edge.toNodeID == engine.selection)
-                let style: GraphicsContext.Shading = touchesSelection
-                    ? .color(Theme.accent.opacity(0.85)) : .color(.white.opacity(0.18))
-                ctx.stroke(curve(a, b), with: style, lineWidth: touchesSelection ? 2.5 : 1.5)
+                let style: GraphicsContext.Shading = selected
+                    ? .color(Theme.accent)
+                    : (touchesSelection ? .color(Theme.accent.opacity(0.85)) : .color(.white.opacity(0.18)))
+                ctx.stroke(graphEdgeCurve(a, b), with: style, lineWidth: selected ? 3 : (touchesSelection ? 2.5 : 1.5))
             }
             if let pf = engine.pendingFrom, let pt = engine.pendingPoint, let a = pendingAnchor(pf) {
-                ctx.stroke(curve(a, pt),
+                ctx.stroke(graphEdgeCurve(a, pt),
                            with: .color(Theme.accent.opacity(0.5)),
                            style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
             }
@@ -109,24 +123,32 @@ private struct EdgeLayer: View {
         guard let j = n.outputKeys.firstIndex(of: pf.key) else { return nil }
         return NodeMetrics.outputAnchor(n, j)
     }
+}
 
-    private func outAnchor(_ e: GraphEdge) -> CGPoint? {
-        guard let n = engine.graph.node(e.fromNodeID) else { return nil }
-        if n.kind == .promptGroup { return engine.groupOutAnchor(n.id) }   // group → FM edge
-        guard let j = n.outputKeys.firstIndex(of: e.outputKey) else { return nil }
-        return NodeMetrics.outputAnchor(n, j)
-    }
-    private func inAnchor(_ e: GraphEdge) -> CGPoint? {
-        guard let n = engine.graph.node(e.toNodeID),
-              let i = n.inputPorts.firstIndex(of: e.inputPort) else { return nil }
-        return NodeMetrics.inputAnchor(n, i)
-    }
-    private func curve(_ a: CGPoint, _ b: CGPoint) -> Path {
-        var p = Path()
-        let c = max(abs(b.x - a.x) * 0.5, 50)
-        p.move(to: a)
-        p.addCurve(to: b, control1: CGPoint(x: a.x + c, y: a.y), control2: CGPoint(x: b.x - c, y: b.y))
-        return p
+/// Transparent thick hit targets over each wire, so an edge can be clicked to select it (then ⌫ to
+/// delete) or right-clicked for a Delete menu. Painted above the visual EdgeLayer but below the node
+/// cards, so a node always wins where they overlap; in the empty space between nodes the wire is hittable.
+private struct EdgeHitLayer: View {
+    @Bindable var engine: GraphEngine
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(engine.graph.edges) { edge in
+                if let (a, b) = engine.edgeAnchors(edge) {
+                    let path = graphEdgeCurve(a, b)
+                    path.stroke(Color.white.opacity(0.001), lineWidth: 16)
+                        .contentShape(path.strokedPath(StrokeStyle(lineWidth: 16, lineCap: .round)))
+                        .onTapGesture { engine.selectEdge(edge.id) }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                engine.snapshot(); engine.deleteEdge(edge.id)
+                                if engine.selectedEdge == edge.id { engine.selectedEdge = nil }
+                            } label: { Label("Delete wire", systemImage: "scissors") }
+                        }
+                }
+            }
+        }
+        .frame(width: 8000, height: 8000, alignment: .topLeading)
     }
 }
 

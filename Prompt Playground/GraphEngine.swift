@@ -50,7 +50,7 @@ enum NodeMetrics {
 @Observable
 final class GraphEngine {
     var graph: GraphDef
-    var selection: UUID? = nil
+    var selection: UUID? = nil { didSet { if selection != nil { selectedEdge = nil } } }  // node + edge selection are exclusive
     var selectedEdge: UUID? = nil      // a wire selected on the canvas (⌫ / context-menu deletes it)
 
     // Canvas transform (canvas → board: p*scale + offset).
@@ -183,6 +183,31 @@ final class GraphEngine {
     }
 
     func deleteEdge(_ id: UUID) { graph.edges.removeAll { $0.id == id } }
+
+    func selectEdge(_ id: UUID) { selectedEdge = id; selection = nil }
+
+    /// ⌫ / Delete: remove the selected wire if one is selected, else the selected node.
+    func deleteSelectionOrEdge() {
+        if let e = selectedEdge { snapshot(); deleteEdge(e); selectedEdge = nil }
+        else { deleteSelection() }
+    }
+
+    /// The two canvas-space endpoints of an edge (output side, input side), or nil if either is missing.
+    /// Shared by the edge renderer and the edge hit-test layer so the visible curve and the click target
+    /// are always the same geometry. A Prompt group's output anchors at its frame's right edge.
+    func edgeAnchors(_ e: GraphEdge) -> (out: CGPoint, in: CGPoint)? {
+        guard let from = graph.node(e.fromNodeID), let to = graph.node(e.toNodeID),
+              let i = to.inputPorts.firstIndex(of: e.inputPort) else { return nil }
+        let outP: CGPoint
+        if from.kind == .promptGroup {
+            guard let a = groupOutAnchor(from.id) else { return nil }
+            outP = a
+        } else {
+            guard let j = from.outputKeys.firstIndex(of: e.outputKey) else { return nil }
+            outP = NodeMetrics.outputAnchor(from, j)
+        }
+        return (outP, NodeMetrics.inputAnchor(to, i))
+    }
 
     /// Remove the edge feeding a given input port (double-click an input port dot to unwire).
     func disconnect(to id: UUID, port: String) {

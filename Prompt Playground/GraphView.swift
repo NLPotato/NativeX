@@ -72,10 +72,10 @@ struct GraphView: View {
                 .keyboardShortcut("l", modifiers: .command)
                 .help("Connect every unwired {{var}} to a same-named output (e.g. an Input’s learning → a block’s {{learning}})")
 
-            Button(role: .destructive) { engine.deleteSelection() } label: { Label("Delete", systemImage: "trash") }
-                .disabled(engine.selection == nil)
+            Button(role: .destructive) { engine.deleteSelectionOrEdge() } label: { Label("Delete", systemImage: "trash") }
+                .disabled(engine.selection == nil && engine.selectedEdge == nil)
                 .tint(.red)
-                .keyboardShortcut(.delete, modifiers: [])   // ⌫ deletes the selected node
+                .keyboardShortcut(.delete, modifiers: [])   // ⌫ deletes the selected node or wire
 
             Divider().frame(height: 16)
 
