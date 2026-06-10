@@ -281,6 +281,8 @@ final class GraphModel {
     var version: Int = 1
     var notes: String = ""
     var graphJSON: String = "{}"          // GraphDef, encoded — migrated up from legacy shapes on read
+    var isPinned: Bool = false            // sidebar: pinned graphs sort to the top
+    var lastRunAt: Date? = nil            // sidebar: most-recently-run sort key (nil ⇒ falls back to createdAt)
 
     // Routes through GraphMigrator (NOT a bare decode) so legacy v1 blobs are lifted to v2 instead of
     // silently decoding to an empty GraphDef — which would destroy the user's saved graph with no error.
