@@ -43,10 +43,31 @@ enum NodeMetrics {
         case .current:     raw = n.current?.template
         case .tool:        raw = n.tool?.toolDescription
         case .fewshot:     raw = n.fewshot?.shots.first.map { "\($0.user) → \($0.assistant)" }
+        case .input:       raw = inputPreview(n.input)
+        case .guided:      raw = n.guided?.schemaDef.map { $0.fields.isEmpty ? $0.typeName : $0.fields.map(\.name).joined(separator: ", ") }
+        case .compare:     raw = "\(n.compare?.laneGroupIDs.count ?? 0) lane(s) · double-click to configure"
         default:           raw = nil
         }
         guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         return s
+    }
+
+    /// Input node's card-face preview: a few static key:values, the bound dataset's columns, or the JSON.
+    private static func inputPreview(_ p: InputPayload?) -> String? {
+        guard let p else { return nil }
+        switch p.source {
+        case .staticLiteral:
+            let pairs = p.statics.sorted { $0.key < $1.key }.prefix(3).map { "\($0.key): \($0.value)" }
+            return pairs.isEmpty ? nil : pairs.joined(separator: "\n")
+        case .dataset:
+            let cols = p.datasetColumns ?? []
+            return cols.isEmpty ? "dataset" : "dataset · " + cols.prefix(4).joined(separator: ", ")
+        case .json:
+            let s = p.jsonLiteral.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (s.isEmpty || s == "{}") ? nil : s
+        case .csv, .excel:
+            return "file · \(p.source.rawValue)"
+        }
     }
 
     /// Auto height with no manual override: header + ports + footer, plus a preview band for text blocks.
@@ -78,6 +99,21 @@ final class GraphEngine {
     var graph: GraphDef
     var selection: UUID? = nil { didSet { if selection != nil { selectedEdge = nil } } }  // node + edge selection are exclusive
     var selectedEdge: UUID? = nil      // a wire selected on the canvas (⌫ / context-menu deletes it)
+
+    /// Multi-selection (Shift+click). Empty ⇒ single-select via `selection`. `selection` stays the PRIMARY
+    /// (drives the inspector / context bar); `selectedSet` carries the rest for move-many / delete-many.
+    var selectedSet: Set<UUID> = []
+    var selectedIDs: Set<UUID> { selection.map { selectedSet.union([$0]) } ?? selectedSet }
+    func isNodeSelected(_ id: UUID) -> Bool { selection == id || selectedSet.contains(id) }
+    /// Plain click → single-select.
+    func selectOnly(_ id: UUID) { selection = id; selectedSet = [] }
+    /// Shift+click → toggle membership (seeded with the prior primary so the first shift-click makes two).
+    func toggleSelect(_ id: UUID) {
+        if selectedSet.isEmpty, let prev = selection, prev != id { selectedSet = [prev] }
+        if selectedSet.contains(id) { selectedSet.remove(id); if selection == id { selection = selectedSet.first } }
+        else { selectedSet.insert(id); selection = id }
+    }
+    func clearSelection() { selection = nil; selectedSet = [] }
 
     // Canvas transform (canvas → board: p*scale + offset).
     var scale: CGFloat = 1
@@ -116,6 +152,21 @@ final class GraphEngine {
     // Group the block currently being dragged would drop into (drives the "+" frame affordance).
     var dropTargetGroup: UUID? = nil
 
+    // Node the cursor is hovering — drives the hover-pop z-order + enlarged port hit-zones. Transient
+    // canvas UI state, NOT part of GraphDef, so it never affects isDirty / execution.
+    var hoveredNode: UUID? = nil
+
+    // Single-run result card (on-canvas overlay beside the terminal FM). View-only — NOT in GraphDef, so
+    // it never persists or affects exec. Reset at the start of each run.
+    var resultCardOffset: CGSize = .zero
+    var resultCardDismissed = false
+
+    // Compare lane (view-only): which compare node's config sheet is open, the last comparison result for
+    // the on-canvas lane cards, and the user's drag offset of that card cluster. Not in GraphDef.
+    var compareConfigFor: UUID? = nil
+    var compareOutcome: CompareOutcome? = nil
+    var compareCardsOffset: CGSize = .zero
+
     // The window's UndoManager (injected by GraphView). Structural edits snapshot the whole GraphDef
     // before mutating, so a single ⌘Z restores it. Kept out of @Observable tracking — it's plumbing.
     @ObservationIgnored var undoManager: UndoManager?
@@ -133,8 +184,30 @@ final class GraphEngine {
     func loadGraph(_ g: GraphDef, id: UUID?) {
         graph = g; loadedID = id
         selection = nil; selectedEdge = nil; runs = [:]; runError = nil; lastTrace = nil
+        compareOutcome = nil; compareConfigFor = nil; compareCardsOffset = .zero
+        resultCardDismissed = false; resultCardOffset = .zero
         normalizeGroupFrames()                 // explicit-frame upgrade (see init) before snapshotting "saved"
         lastSavedGraph = graph
+    }
+
+    /// Start a fresh, empty working buffer (sidebar "New Graph"). It isn't a saved GraphModel yet —
+    /// `loadedID = nil` until the first explicit Save mints one (named by timestamp, see `persist`).
+    func newGraph() { loadGraph(GraphDef(), id: nil) }
+
+    /// Default name for a brand-new graph — the run/creation time, Claude-Desktop style (rename in the
+    /// sidebar). Abbreviated date + short time, e.g. "Jun 10, 2026 at 3:42 PM".
+    static func defaultGraphName(_ date: Date = Date()) -> String {
+        date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// On-card display name when a node has no user-set title: the guided schema's type name (e.g.
+    /// "GlossResult"), else "<Kind>_<N>" where N is the 1-based index among same-kind nodes (so two
+    /// Inputs read Input_1 / Input_2). Computed, never stored — keeps loads off `isDirty`.
+    func defaultTitle(for node: GraphNode) -> String {
+        if node.kind == .guided, let name = node.guided?.schemaDef?.typeName, !name.isEmpty { return name }
+        let peers = graph.nodes.filter { $0.kind == node.kind }
+        let n = (peers.firstIndex { $0.id == node.id } ?? 0) + 1
+        return "\(node.kind.label)_\(n)"
     }
 
     /// Persist the working graph: update the open GraphModel (by `loadedID`) or insert a new one, then
@@ -146,7 +219,7 @@ final class GraphEngine {
             m.graphJSON = JSONCoder.encode(graph)
             m.version += 1
         } else {
-            let m = GraphModel(name: "Graph \(existing.count + 1)", graph: graph)
+            let m = GraphModel(name: GraphEngine.defaultGraphName(), graph: graph)
             context.insert(m)
             loadedID = m.id
         }
@@ -198,23 +271,40 @@ final class GraphEngine {
     func addNode(_ kind: NodeKind, at p: CGPoint) {
         snapshot()
         var n = GraphEngine.make(kind)
-        // Adding a block while a Prompt group is selected drops it INTO that group, stacked below its
-        // current members so it lands inside the frame (not floating at the cursor as an orphan member).
-        let intoGroup = (kind.isBlock && selection.map { graph.node($0)?.kind == .promptGroup } == true) ? selection : nil
-        if let sel = intoGroup {
-            n.groupID = sel
-            let ms = members(of: sel)
+        // A block always belongs to a Prompt group. Use the selected group, the selected block's group, or —
+        // if there's none — AUTO-CREATE a group at the drop point so the block is never an orphan member.
+        if kind.isBlock {
+            let group = blockTargetGroup() ?? makeGroup(at: p)
+            n.groupID = group
+            let ms = members(of: group)
             if let lowest = ms.map({ $0.y + NodeMetrics.height($0) }).max(), let x = ms.map(\.x).min() {
                 n.x = x; n.y = lowest + 20
-            } else if let g = graph.node(sel) {
+            } else if let g = graph.node(group) {
                 n.x = g.x + 60; n.y = g.y + GraphEngine.groupHeader + 20
             }
+            graph.nodes.append(n)
+            selection = n.id; selectedSet = []
+            fitGroupFrame(group)   // grow the frame so the new block sits inside it
         } else {
             n.x = p.x; n.y = p.y
+            graph.nodes.append(n)
+            selection = n.id; selectedSet = []
         }
-        graph.nodes.append(n)
-        selection = n.id
-        if let sel = intoGroup { fitGroupFrame(sel) }   // grow the frame so the new block sits inside it
+    }
+
+    /// The group a newly-added block should join: the selected group, or the selected block's group, else nil.
+    private func blockTargetGroup() -> UUID? {
+        guard let sel = selection, let node = graph.node(sel) else { return nil }
+        if node.kind == .promptGroup { return sel }
+        return node.groupID                      // selected a block → join its group
+    }
+
+    /// Spawn a fresh Prompt group at `p` (used to auto-host an orphan block). Returns its id.
+    private func makeGroup(at p: CGPoint) -> UUID {
+        var g = GraphEngine.make(.promptGroup)
+        g.x = p.x; g.y = p.y
+        graph.nodes.append(g)
+        return g.id
     }
 
     /// Canvas-space point at the center of the visible pane — where menu/hotkey-added nodes appear.
@@ -247,19 +337,27 @@ final class GraphEngine {
 
     func deleteSelection() { if let id = selection { deleteNode(id) } }
 
-    /// Clone the selected node (new id, nudged position), keeping a block's group membership. Edges are
-    /// not copied — the clone starts unwired. A duplicated Prompt group starts empty (members aren't deep-copied).
+    /// Clone the selected node (new id, nudged position). Edges are not copied — the clone starts unwired.
+    /// Duplicating a Prompt group DEEP-COPIES its member blocks (new ids, same offset, re-parented to the clone).
     func duplicateSelection() {
         guard let id = selection, var n = graph.node(id) else { return }
         snapshot()
-        n.id = UUID()
-        n.x += 36; n.y += 36
+        let newID = UUID()
+        n.id = newID; n.x += 36; n.y += 36
         graph.nodes.append(n)
-        selection = n.id
+        if n.kind == .promptGroup {
+            for var m in members(of: id) {
+                m.id = UUID(); m.x += 36; m.y += 36; m.groupID = newID
+                graph.nodes.append(m)
+            }
+        }
+        selectOnly(newID)
     }
 
-    func deleteNode(_ id: UUID) {
-        snapshot()
+    func deleteNode(_ id: UUID) { snapshot(); removeNode(id) }
+
+    /// Delete without snapshotting — so a batch (multi-select) registers a single undo step.
+    private func removeNode(_ id: UUID) {
         // Deleting a Prompt group orphans its members (they keep groupID pointing at nothing) — clear it
         // so they become free blocks again rather than invisible ghosts.
         if graph.node(id)?.kind == .promptGroup {
@@ -268,6 +366,7 @@ final class GraphEngine {
         graph.nodes.removeAll { $0.id == id }
         graph.edges.removeAll { $0.fromNodeID == id || $0.toNodeID == id }
         if selection == id { selection = nil }
+        selectedSet.remove(id)
         runs[id] = nil
     }
 
@@ -296,6 +395,7 @@ final class GraphEngine {
     /// ⌫ / Delete: remove the selected wire if one is selected, else the selected node.
     func deleteSelectionOrEdge() {
         if let e = selectedEdge { snapshot(); deleteEdge(e); selectedEdge = nil }
+        else if !selectedSet.isEmpty { snapshot(); for id in selectedIDs { removeNode(id) }; selectedSet = [] }
         else { deleteSelection() }
     }
 
@@ -332,7 +432,9 @@ final class GraphEngine {
         if let a = armedFrom, a.node == node, a.key == key { armedFrom = nil }
         else { armedFrom = (node, key); selection = node }
     }
-    func cancelArm() { armedFrom = nil }
+    /// Abort any in-progress wiring (background click): drop the armed source AND any pending drag wire so
+    /// a stuck dashed wire (a drag whose onEnded never fired) can never linger on the canvas.
+    func cancelArm() { armedFrom = nil; pendingFrom = nil; pendingFromInput = nil; pendingPoint = nil }
 
     /// Click a target input while a wire is armed → complete it. Returns false if nothing was armed
     /// (so the caller can fall back to selecting the node).
@@ -384,6 +486,7 @@ final class GraphEngine {
     func run() async {
         guard !isRunning else { return }
         isRunning = true; runError = nil; runs = [:]; lastTrace = nil
+        resultCardOffset = .zero; resultCardDismissed = false   // fresh result card per run
         defer { isRunning = false }
         do {
             let result = try await GraphExecutor.run(graph) { run in self.runs[run.nodeID] = run }
@@ -391,6 +494,22 @@ final class GraphEngine {
         } catch {
             runError = error.localizedDescription
         }
+    }
+
+    /// The FM whose output is the run's final result: a sink FM (no outgoing edges), else the last FM.
+    /// Anchors the on-canvas result card. View-only.
+    var terminalFM: GraphNode? {
+        let fms = graph.nodes.filter { $0.kind == .fm }
+        guard !fms.isEmpty else { return nil }
+        let sinks = fms.filter { fm in !graph.edges.contains { $0.fromNodeID == fm.id } }
+        return sinks.last ?? fms.last
+    }
+
+    /// The terminal FM's generated text after a successful run (nil until one completes).
+    var singleRunOutput: String? {
+        guard let fm = terminalFM, let out = runs[fm.id]?.outputs["output"] else { return nil }
+        let s = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
     }
 
     // MARK: Transform helpers (board ↔ canvas)
