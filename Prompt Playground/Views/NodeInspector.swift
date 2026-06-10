@@ -455,7 +455,7 @@ private struct CompareEditor: View {
         Task {
             await runner.run(graph: engine.graph, laneGroupIDs: ids, graphName: name,
                              dataset: dataset, context: context)
-            if runner.lastOutcome != nil { showResult = true }
+            if let o = runner.lastOutcome { engine.compareOutcome = o }   // → on-canvas lane cards
         }
     }
 }
