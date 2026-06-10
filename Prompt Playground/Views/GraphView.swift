@@ -15,7 +15,6 @@ struct GraphView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.undoManager) private var undoManager
     @State private var engine = GraphEngine(graph: GraphEngine.exampleGloss())
-    @State private var showInspector = true
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
     @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
     @State private var batch = GraphBatchRunner()
@@ -30,7 +29,7 @@ struct GraphView: View {
             }
             .frame(minWidth: 480)
 
-            if showInspector {
+            if engine.showInspector {
                 inspectorPane
                     .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth, maxWidth: 540)
             }
@@ -108,18 +107,6 @@ struct GraphView: View {
             Button { undoManager?.redo() } label: { Image(systemName: "arrow.uturn.forward") }
                 .disabled(!(undoManager?.canRedo ?? false)).help("Redo (⌘⇧Z)")
 
-            Divider().frame(height: 16)
-
-            // Zoom: − / % / + (also ⌘± ). Anchored to the viewport center via GraphEngine.zoom.
-            Button { engine.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
-                .keyboardShortcut("-", modifiers: .command).help("Zoom out")
-            Text("\(Int((engine.scale * 100).rounded()))%")
-                .font(.dsMicro).foregroundStyle(.secondary).monospacedDigit().frame(width: 40)
-            Button { engine.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
-                .keyboardShortcut("+", modifiers: .command).help("Zoom in")
-            Button { engine.fitToView() } label: { Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right") }
-                .keyboardShortcut("0", modifiers: .command).help("Fit graph to view (⌘0)")
-
             Spacer()
 
             if let err = engine.runError {
@@ -151,9 +138,9 @@ struct GraphView: View {
             Button { save() } label: { Label("Save", systemImage: "tray.and.arrow.up") }
 
             Divider().frame(height: 16)
-            Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
+            Button { engine.showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .help(showInspector ? "Hide inspector" : "Show inspector")
+                .help(engine.showInspector ? "Hide inspector" : "Show inspector")
         }
         .padding(.horizontal, DS.Space.lg).padding(.vertical, DS.Space.sm)
         .font(.dsCaption)

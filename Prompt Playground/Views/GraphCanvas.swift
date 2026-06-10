@@ -74,6 +74,8 @@ struct GraphCanvas: View {
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
             // Figma/Photoshop-style floating bar — actions for the current selection, pinned bottom-center.
             .overlay(alignment: .bottom) { CanvasContextBar(engine: engine).padding(.bottom, DS.Space.lg) }
+            // Zoom control in the corner (Figma/Adobe convention) — keeps the top toolbar uncluttered.
+            .overlay(alignment: .bottomTrailing) { CanvasZoomControl(engine: engine).padding(DS.Space.lg) }
         }
     }
 
@@ -235,6 +237,7 @@ private struct NodeCardView: View {
         .overlay(alignment: .topLeading) { portDots }
         .overlay(alignment: .bottomTrailing) { resizeGrip }
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { engine.selection = node.id; engine.showInspector = true }
         .onTapGesture { engine.selection = node.id }
         .gesture(moveGesture)
     }
@@ -527,6 +530,7 @@ private struct GroupFrameView: View {
         .padding(.horizontal, DS.Space.md)
         .frame(width: rect.width, height: GraphEngine.groupHeader, alignment: .leading)
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { engine.selection = group.id; engine.showInspector = true }
         .onTapGesture { engine.selection = group.id }
         .gesture(moveGesture)
     }
@@ -700,5 +704,41 @@ private struct CanvasContextBar: View {
         Button { engine.addNode(kind, at: engine.viewportCenterCanvas) } label: {
             Label(kind.label, systemImage: kind.symbol)
         }
+    }
+}
+
+// MARK: - Floating zoom control
+
+/// A compact zoom capsule pinned to the canvas's bottom-right corner (Figma/Adobe convention): − / % / +
+/// and Fit. Relocated out of the top toolbar so it stops crowding the chrome at narrow widths. The
+/// ⌘± / ⌘0 shortcuts ride on these buttons (they moved here with the controls).
+private struct CanvasZoomControl: View {
+    @Bindable var engine: GraphEngine
+
+    var body: some View {
+        HStack(spacing: DS.Space.xs) {
+            iconButton("minus.magnifyingglass", "Zoom out (⌘−)") { engine.zoomOut() }
+                .keyboardShortcut("-", modifiers: .command)
+            Button { engine.resetZoom() } label: {
+                Text("\(Int((engine.scale * 100).rounded()))%")
+                    .font(.dsMicro).monospacedDigit().foregroundStyle(.secondary).frame(width: 38)
+            }
+            .buttonStyle(.plain).help("Reset to 100%")
+            iconButton("plus.magnifyingglass", "Zoom in (⌘+)") { engine.zoomIn() }
+                .keyboardShortcut("+", modifiers: .command)
+            Divider().frame(height: 14)
+            iconButton("arrow.up.left.and.arrow.down.right", "Fit to view (⌘0)") { engine.fitToView() }
+                .keyboardShortcut("0", modifiers: .command)
+        }
+        .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xs)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+        .tint(.primary)
+    }
+
+    private func iconButton(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(width: 22, height: 18) }
+            .buttonStyle(.borderless).help(help)
     }
 }

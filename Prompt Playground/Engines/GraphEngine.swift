@@ -76,6 +76,10 @@ final class GraphEngine {
     var offset: CGSize = .zero
     var viewportSize: CGSize = .zero   // canvas pane size (written by GraphCanvas) — anchors button zoom
 
+    // Right inspector panel visibility. Lives here (not as GraphView @State) so the canvas can open it
+    // on a node double-click, and so it rides along when the engine is hoisted above navigation.
+    var showInspector = false
+
     // Run state.
     var isRunning = false
     var runs: [UUID: GraphNodeRun] = [:]
@@ -361,6 +365,7 @@ final class GraphEngine {
     private var viewportCenter: CGPoint { CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2) }
     func zoomIn()  { zoom(by: 1.15, around: viewportCenter) }
     func zoomOut() { zoom(by: 1 / 1.15, around: viewportCenter) }
+    func resetZoom() { zoom(by: 1 / scale, around: viewportCenter) }   // back to 100%, anchored at center
 
     /// Frame the whole graph: scale + offset so every node card and Prompt-group frame fits the viewport
     /// with padding (capped at 100% so a tiny graph isn't blown up). Unlike "reset", this finds the work.
