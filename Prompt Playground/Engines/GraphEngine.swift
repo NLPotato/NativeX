@@ -12,6 +12,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 // MARK: - Canvas geometry (analytic anchors)
 
@@ -95,6 +96,11 @@ final class GraphEngine {
 
     // Persistence link (which saved GraphModel is open).
     var loadedID: UUID? = nil
+    // The graph as last saved/loaded — `isDirty` compares the live graph against it so navigation and the
+    // quit-warning know whether there's unsaved work. Set on init / loadGraph / persist; structural edits
+    // diverge it (GraphDef is Equatable, so the compare is cheap).
+    var lastSavedGraph: GraphDef? = nil
+    var isDirty: Bool { graph != lastSavedGraph }
 
     // Transient wiring drag (canvas space). `pendingFrom` is a drag started at an OUTPUT port (seeking an
     // input); `pendingFromInput` is a drag started at an INPUT port (seeking an output) — wires connect
@@ -114,7 +120,34 @@ final class GraphEngine {
     // before mutating, so a single ⌘Z restores it. Kept out of @Observable tracking — it's plumbing.
     @ObservationIgnored var undoManager: UndoManager?
 
-    init(graph: GraphDef = .init()) { self.graph = graph }
+    init(graph: GraphDef = .init()) { self.graph = graph; self.lastSavedGraph = graph }
+
+    // MARK: Load / persist (the working graph survives navigation; the quit-warning saves through here)
+
+    /// Replace the working graph (Load menu / insert example). Resets transient run + selection state and
+    /// marks the graph clean — a freshly loaded graph isn't "unsaved work".
+    func loadGraph(_ g: GraphDef, id: UUID?) {
+        graph = g; loadedID = id
+        selection = nil; selectedEdge = nil; runs = [:]; runError = nil; lastTrace = nil
+        lastSavedGraph = g
+    }
+
+    /// Persist the working graph: update the open GraphModel (by `loadedID`) or insert a new one, then
+    /// mark clean. Centralized here so the toolbar Save and the quit-warning Save share one path —
+    /// the latter must work even when GraphView isn't on screen.
+    func persist(into context: ModelContext) {
+        let existing = (try? context.fetch(FetchDescriptor<GraphModel>())) ?? []
+        if let id = loadedID, let m = existing.first(where: { $0.id == id }) {
+            m.graphJSON = JSONCoder.encode(graph)
+            m.version += 1
+        } else {
+            let m = GraphModel(name: "Graph \(existing.count + 1)", graph: graph)
+            context.insert(m)
+            loadedID = m.id
+        }
+        try? context.save()
+        lastSavedGraph = graph
+    }
 
     // MARK: Undo (whole-graph snapshots)
 

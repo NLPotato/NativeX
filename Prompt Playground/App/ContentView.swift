@@ -3,32 +3,50 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var context
+    let engine: GraphEngine   // owned by the App so the working graph survives page navigation
     @State private var page: AppPage? = .workspace
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(AppPage.allCases, selection: $page) { p in
                 Label(p.title, systemImage: p.symbol).tag(p)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 230)
         } detail: {
             switch page ?? .workspace {
-            case .workspace: WorkspaceTabs()
+            case .workspace: WorkspaceTabs(engine: engine)
             case .history:   RunHistoryView()
             }
         }
         .tint(Color.dsAccent)
         .preferredColorScheme(.dark)
         .task { SeedData.seedIfNeeded(context) }
+        // ⌘\ — Figma-style "focus mode": hide BOTH side panels (left sidebar + right inspector) for a
+        // clean full-canvas, or restore them. A hidden button carries the shortcut app-wide.
+        .background {
+            Button(action: togglePanels) { EmptyView() }
+                .keyboardShortcut("\\", modifiers: .command).opacity(0).accessibilityHidden(true)
+        }
+    }
+
+    private func togglePanels() {
+        let anyShown = columnVisibility != .detailOnly || engine.showInspector
+        withAnimation(.easeInOut(duration: 0.2)) {
+            columnVisibility = anyShown ? .detailOnly : .all
+            engine.showInspector = !anyShown
+        }
     }
 }
 
 /// The original authoring workspace — the three tabs are unchanged; they just live behind the
 /// first sidebar page now (Run History is the second).
 private struct WorkspaceTabs: View {
+    let engine: GraphEngine
+
     var body: some View {
         TabView {
-            GraphView()
+            GraphView(engine: engine)
                 .tabItem { Label("Graph", systemImage: "point.3.connected.trianglepath.dotted") }
             DatasetsView()
                 .tabItem { Label("Datasets", systemImage: "tablecells") }

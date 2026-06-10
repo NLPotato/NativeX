@@ -14,7 +14,7 @@ import SwiftData
 struct GraphView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.undoManager) private var undoManager
-    @State private var engine = GraphEngine(graph: GraphEngine.exampleGloss())
+    let engine: GraphEngine   // owned by the App so the working graph survives navigation
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
     @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
     @State private var batch = GraphBatchRunner()
@@ -115,26 +115,24 @@ struct GraphView: View {
             }
 
             Menu {
-                Button("Insert example: gloss") {
-                    engine.graph = GraphEngine.exampleGloss(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
-                }
-                Button("Insert example: compare (A/B)") {
-                    engine.graph = GraphEngine.exampleCompare(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
-                }
-                Button("Insert example: compare × dataset") {
-                    engine.graph = GraphEngine.exampleCompareDataset(); engine.loadedID = nil; engine.selection = nil; engine.runs = [:]
-                }
+                Button("Insert example: gloss") { engine.loadGraph(GraphEngine.exampleGloss(), id: nil) }
+                Button("Insert example: compare (A/B)") { engine.loadGraph(GraphEngine.exampleCompare(), id: nil) }
+                Button("Insert example: compare × dataset") { engine.loadGraph(GraphEngine.exampleCompareDataset(), id: nil) }
                 Divider()
                 if saved.isEmpty {
                     Text("No saved graphs")
                 } else {
                     ForEach(saved) { g in
-                        Button(g.name) { engine.graph = g.graphDef; engine.loadedID = g.id; engine.selection = nil; engine.runs = [:] }
+                        Button(g.name) { engine.loadGraph(g.graphDef, id: g.id) }
                     }
                 }
             } label: { Label("Load", systemImage: "tray.and.arrow.down") }
             .menuStyle(.borderlessButton).fixedSize()
 
+            if engine.isDirty {
+                Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(Theme.gold)
+                    .help("Unsaved changes")
+            }
             Button { save() } label: { Label("Save", systemImage: "tray.and.arrow.up") }
 
             Divider().frame(height: 16)
@@ -198,15 +196,5 @@ struct GraphView: View {
         try? context.save()
     }
 
-    private func save() {
-        if let id = engine.loadedID, let m = saved.first(where: { $0.id == id }) {
-            m.graphJSON = JSONCoder.encode(engine.graph)
-            m.version += 1
-        } else {
-            let m = GraphModel(name: "Graph \(saved.count + 1)", graph: engine.graph)
-            context.insert(m)
-            engine.loadedID = m.id
-        }
-        try? context.save()
-    }
+    private func save() { engine.persist(into: context) }
 }
