@@ -15,6 +15,7 @@ struct GraphView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.undoManager) private var undoManager
     let engine: GraphEngine   // owned by the App so the working graph survives navigation
+    var onOpenLab: () -> Void = {}   // deep-link from the batch summary card → switch to the Lab tab
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
     @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
     @State private var batch = GraphBatchRunner()
@@ -24,7 +25,8 @@ struct GraphView: View {
             VStack(spacing: 0) {
                 toolbar
                 Divider()
-                GraphCanvas(engine: engine, onRun: persistRun)
+                GraphCanvas(engine: engine, onRun: persistRun, batch: datasetInput != nil ? batch : nil,
+                            boundDataset: boundDataset, onRunDataset: runOverDataset, onOpenLab: onOpenLab)
                     .runningRadiance(active: engine.isRunning)
             }
             .frame(minWidth: 480)
@@ -44,22 +46,8 @@ struct GraphView: View {
 
     private var toolbar: some View {
         HStack(spacing: DS.Space.md) {
-            // Run moved out of the toolbar to a prominent accent pill on the canvas (bottom-left, ⌘↩) —
-            // see CanvasRunControl. The toolbar keeps the secondary "Run dataset" batch lane below.
-
-            // Batch lane: visible only when an Input is bound to a dataset. Runs the graph per row →
-            // one Lab experiment (see GraphBatchRunner). Cancellable; the on-device model runs one at a time.
-            if datasetInput != nil {
-                Button { runOverDataset() } label: {
-                    Label(batch.isRunning ? "Row \(batch.completed)/\(batch.total)…" : "Run dataset",
-                          systemImage: "square.stack.3d.down.right.fill")
-                }
-                .disabled(batch.isRunning || engine.isRunning || boundDataset == nil)
-                .help("Run this graph over every row of the bound dataset → saved as a Lab experiment")
-                if batch.isRunning {
-                    Button { batch.cancel() } label: { Image(systemName: "stop.fill") }.tint(.red)
-                }
-            }
+            // Run AND Run-dataset both live on the canvas now (CanvasRunControl, bottom-left) — the toolbar
+            // no longer carries a separate batch button (that split between toolbar + canvas was confusing).
 
             Menu {
                 addItem(.promptGroup, "p")
@@ -105,24 +93,14 @@ struct GraphView: View {
 
             Spacer()
 
-            if let err = engine.runError {
-                Label(err, systemImage: "exclamationmark.triangle.fill")
-                    .font(.dsCaption).foregroundStyle(.dsDanger).lineLimit(1)
-            }
+            // Run errors surface as a top-right canvas toast (CanvasErrorToast), not in the toolbar.
 
+            // Saved graphs now live in the left sidebar (GraphListSidebar); this menu just seeds examples.
             Menu {
                 Button("Insert example: gloss") { engine.loadGraph(GraphEngine.exampleGloss(), id: nil) }
                 Button("Insert example: compare (A/B)") { engine.loadGraph(GraphEngine.exampleCompare(), id: nil) }
                 Button("Insert example: compare × dataset") { engine.loadGraph(GraphEngine.exampleCompareDataset(), id: nil) }
-                Divider()
-                if saved.isEmpty {
-                    Text("No saved graphs")
-                } else {
-                    ForEach(saved) { g in
-                        Button(g.name) { engine.loadGraph(g.graphDef, id: g.id) }
-                    }
-                }
-            } label: { Label("Load", systemImage: "tray.and.arrow.down") }
+            } label: { Label("Examples", systemImage: "sparkles") }
             .menuStyle(.borderlessButton).fixedSize()
 
             if engine.isDirty {
@@ -187,8 +165,9 @@ struct GraphView: View {
     /// ran — a pre-run validation failure throws before any step, leaving no trace to persist.
     private func persistRun() {
         guard let trace = engine.lastTrace, !trace.steps.isEmpty else { return }
-        let name = saved.first { $0.id == engine.loadedID }?.name ?? "Untitled graph"
-        context.insert(TraceModel(trace, sourceName: name))
+        let loaded = saved.first { $0.id == engine.loadedID }
+        context.insert(TraceModel(trace, sourceName: loaded?.name ?? "Untitled graph"))
+        loaded?.lastRunAt = Date()    // float this graph to the top of the sidebar's recent-run sort
         try? context.save()
     }
 
