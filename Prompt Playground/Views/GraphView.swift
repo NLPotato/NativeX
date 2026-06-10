@@ -24,7 +24,7 @@ struct GraphView: View {
             VStack(spacing: 0) {
                 toolbar
                 Divider()
-                GraphCanvas(engine: engine)
+                GraphCanvas(engine: engine, onRun: persistRun)
                     .runningRadiance(active: engine.isRunning)
             }
             .frame(minWidth: 480)
@@ -44,12 +44,8 @@ struct GraphView: View {
 
     private var toolbar: some View {
         HStack(spacing: DS.Space.md) {
-            // Run is the ONE accent action at rest — everything else is neutral chrome.
-            Button { Task { await engine.run(); persistRun() } } label: {
-                Label(engine.isRunning ? "Running…" : "Run", systemImage: "play.fill")
-            }
-            .disabled(engine.isRunning || engine.graph.nodes.isEmpty)
-            .tint(Theme.accent)
+            // Run moved out of the toolbar to a prominent accent pill on the canvas (bottom-left, ⌘↩) —
+            // see CanvasRunControl. The toolbar keeps the secondary "Run dataset" batch lane below.
 
             // Batch lane: visible only when an Input is bound to a dataset. Runs the graph per row →
             // one Lab experiment (see GraphBatchRunner). Cancellable; the on-device model runs one at a time.

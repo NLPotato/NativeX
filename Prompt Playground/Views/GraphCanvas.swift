@@ -34,6 +34,7 @@ func kindTint(_ kind: NodeKind) -> Color {
 
 struct GraphCanvas: View {
     @Bindable var engine: GraphEngine
+    var onRun: () -> Void = {}            // logs the finished run to Run History (GraphView.persistRun)
 
     @State private var panStart: CGSize? = nil
     @State private var zoomStart: CGFloat? = nil
@@ -72,6 +73,9 @@ struct GraphCanvas: View {
             .coordinateSpace(name: graphBoardSpace)
             .onDeleteCommand { engine.deleteSelectionOrEdge() }
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
+            // The primary action — a prominent accent Run pill in the bottom-left corner (⌘↩), pulled out
+            // of the top toolbar so the most important command lives on the canvas and stands out.
+            .overlay(alignment: .bottomLeading) { CanvasRunControl(engine: engine, onRun: onRun).padding(DS.Space.lg) }
             // Figma/Photoshop-style floating bar — actions for the current selection, pinned bottom-center.
             .overlay(alignment: .bottom) { CanvasContextBar(engine: engine).padding(.bottom, DS.Space.lg) }
             // Zoom control in the corner (Figma/Adobe convention) — keeps the top toolbar uncluttered.
@@ -258,7 +262,7 @@ private struct NodeCardView: View {
                         engine.resizeNode(node.id, to: CGSize(width:  s.width  + v.translation.width  / engine.scale,
                                                               height: s.height + v.translation.height / engine.scale))
                     }
-                    .onEnded { _ in resizeStart = nil }
+                    .onEnded { _ in resizeStart = nil; engine.settleLayout(after: [node.id]) }
             )
             .help("Drag to resize (width + height)")
     }
@@ -414,7 +418,7 @@ private struct NodeCardView: View {
                     .onHover { hoveredOutput = $0 ? key : (hoveredOutput == key ? nil : hoveredOutput) }
                     .gesture(connectGesture(key: key))
                     .onTapGesture { engine.armOutput(node: node.id, key: key) }
-                    .help("Drag to an input, or click to arm then click a target input")
+                    .help("Drag to an input — drag again to fan this variable out to more inputs. Or click to arm, then click a target.")
                 PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary,
                             active: armed || hoveredOutput == key)
                     .position(x: w, y: y).allowsHitTesting(false)
@@ -481,7 +485,10 @@ private struct NodeCardView: View {
                                                  y: s.y + v.translation.height / engine.scale))
                 if node.kind.isBlock { engine.updateGroupDrag(node.id) }   // live join/leave + "+" highlight
             }
-            .onEnded { _ in moveStart = nil; engine.endGroupDrag() }
+            .onEnded { _ in
+                moveStart = nil; engine.endGroupDrag()
+                engine.settleLayout(after: [node.id])   // push aside anything this drop overlaps; refit its group
+            }
     }
 
     private func connectGesture(key: String) -> some Gesture {
@@ -560,6 +567,7 @@ private struct GroupFrameView: View {
     let group: GraphNode
     let rect: CGRect
     @State private var dragStart: [UUID: CGPoint]? = nil
+    @State private var resizeStart: CGSize? = nil
 
     private var selected: Bool { engine.selection == group.id }
     private var dropping: Bool { engine.dropTargetGroup == group.id }
@@ -586,6 +594,26 @@ private struct GroupFrameView: View {
             outPort
         }
         .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+        .overlay(alignment: .bottomTrailing) { resizeGrip }
+    }
+
+    /// Bottom-right grip: drag to resize the Prompt frame itself (an explicit container now, not auto-hugged).
+    private var resizeGrip: some View {
+        Image(systemName: "arrow.down.right")
+            .font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.accent.opacity(0.8))
+            .frame(width: 20, height: 20)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(coordinateSpace: .named(graphBoardSpace))
+                    .onChanged { v in
+                        if resizeStart == nil { engine.snapshot(); resizeStart = CGSize(width: rect.width, height: rect.height) }
+                        let s = resizeStart ?? .zero
+                        engine.resizeGroup(group.id, to: CGSize(width:  s.width  + v.translation.width  / engine.scale,
+                                                                height: s.height + v.translation.height / engine.scale))
+                    }
+                    .onEnded { _ in resizeStart = nil }
+            )
+            .help("Drag to resize the Prompt frame")
     }
 
     private var header: some View {
@@ -641,7 +669,10 @@ private struct GroupFrameView: View {
                     engine.move(id, to: CGPoint(x: start.x + dx, y: start.y + dy))
                 }
             }
-            .onEnded { _ in dragStart = nil }
+            .onEnded { _ in
+                dragStart = nil
+                engine.settleLayout(after: Set(engine.members(of: group.id).map(\.id)))   // members move as one block
+            }
     }
 
     private var connectGesture: some Gesture {
@@ -778,6 +809,40 @@ private struct CanvasContextBar: View {
         Button { engine.addNode(kind, at: engine.viewportCenterCanvas) } label: {
             Label(kind.label, systemImage: kind.symbol)
         }
+    }
+}
+
+// MARK: - Floating Run control
+
+/// The graph's primary action as a bold accent pill on the canvas (bottom-left). Always visible so Run is
+/// one click or ⌘↩ — disabled (dimmed) while running or when the graph is empty. After the run finishes it
+/// calls `onRun` to log the trace to Run History (the work the old top-toolbar Run button did).
+private struct CanvasRunControl: View {
+    @Bindable var engine: GraphEngine
+    let onRun: () -> Void
+
+    private var disabled: Bool { engine.isRunning || engine.graph.nodes.isEmpty }
+
+    var body: some View {
+        Button { Task { await engine.run(); onRun() } } label: {
+            HStack(spacing: DS.Space.xs) {
+                if engine.isRunning {
+                    ProgressView().controlSize(.small).tint(.black)
+                } else {
+                    Image(systemName: "play.fill").font(.system(size: 12, weight: .bold))
+                }
+                Text(engine.isRunning ? "Running…" : "Run").font(.dsCaption.weight(.bold))
+            }
+            .foregroundStyle(.black)               // dark ink reads on the neon-green accent fill
+            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+            .background(Theme.accent.opacity(disabled && !engine.isRunning ? 0.35 : 1), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+            .shadow(color: Theme.accent.opacity(0.5), radius: 10, y: 3)   // accent glow → stands out from chrome
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .keyboardShortcut(.return, modifiers: .command)
+        .help(engine.graph.nodes.isEmpty ? "Add nodes, then Run (⌘↩)" : "Run the graph (⌘↩)")
     }
 }
 

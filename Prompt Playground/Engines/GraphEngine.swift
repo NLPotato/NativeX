@@ -120,7 +120,11 @@ final class GraphEngine {
     // before mutating, so a single ⌘Z restores it. Kept out of @Observable tracking — it's plumbing.
     @ObservationIgnored var undoManager: UndoManager?
 
-    init(graph: GraphDef = .init()) { self.graph = graph; self.lastSavedGraph = graph }
+    init(graph: GraphDef = .init()) {
+        self.graph = graph
+        normalizeGroupFrames()                 // give pre-explicit-frame graphs a frame sized to their members
+        self.lastSavedGraph = self.graph
+    }
 
     // MARK: Load / persist (the working graph survives navigation; the quit-warning saves through here)
 
@@ -129,7 +133,8 @@ final class GraphEngine {
     func loadGraph(_ g: GraphDef, id: UUID?) {
         graph = g; loadedID = id
         selection = nil; selectedEdge = nil; runs = [:]; runError = nil; lastTrace = nil
-        lastSavedGraph = g
+        normalizeGroupFrames()                 // explicit-frame upgrade (see init) before snapshotting "saved"
+        lastSavedGraph = graph
     }
 
     /// Persist the working graph: update the open GraphModel (by `loadedID`) or insert a new one, then
@@ -195,7 +200,8 @@ final class GraphEngine {
         var n = GraphEngine.make(kind)
         // Adding a block while a Prompt group is selected drops it INTO that group, stacked below its
         // current members so it lands inside the frame (not floating at the cursor as an orphan member).
-        if kind.isBlock, let sel = selection, graph.node(sel)?.kind == .promptGroup {
+        let intoGroup = (kind.isBlock && selection.map { graph.node($0)?.kind == .promptGroup } == true) ? selection : nil
+        if let sel = intoGroup {
             n.groupID = sel
             let ms = members(of: sel)
             if let lowest = ms.map({ $0.y + NodeMetrics.height($0) }).max(), let x = ms.map(\.x).min() {
@@ -208,6 +214,7 @@ final class GraphEngine {
         }
         graph.nodes.append(n)
         selection = n.id
+        if let sel = intoGroup { fitGroupFrame(sel) }   // grow the frame so the new block sits inside it
     }
 
     /// Canvas-space point at the center of the visible pane — where menu/hotkey-added nodes appear.
@@ -480,35 +487,23 @@ final class GraphEngine {
         return best.map { ($0.node, $0.port) }
     }
 
-    // MARK: Prompt groups (the framed container; membership = groupID)
+    // MARK: Prompt groups (an explicit, resizable frame container; membership = block center inside it)
 
-    static let groupPad: CGFloat = 30      // breathing room around members (generous, so blocks aren't cramped)
-    static let groupHeader: CGFloat = 30   // canvas-space header band reserved ABOVE the members
-    static let groupDropMargin: CGFloat = 80  // how far OUTSIDE the frame a block still counts as "in" — generous
-                                              // catch when dropping in, and hysteresis so repositioning never expels
+    static let groupPad: CGFloat = 30        // breathing room kept around members when the frame grows to fit them
+    static let groupHeader: CGFloat = 30     // canvas-space header band reserved ABOVE the members
+    static let groupStickyMargin: CGFloat = 24  // hysteresis: a member stays until its center leaves the frame by this much
+    static let groupMinWidth: CGFloat = 240
+    static let groupMinHeight: CGFloat = 140
 
     func members(of groupID: UUID) -> [GraphNode] { graph.nodes.filter { $0.groupID == groupID } }
 
-    /// The frame enclosing a group's members (canvas space); the group node's own x/y/size when empty.
+    /// The group's frame — now an EXPLICIT rect (origin + stored size), independent of its members, so it's a
+    /// stable target you can size and drag blocks in/out of (vs. the old auto-shrink-wrap that felt twitchy).
     func groupRect(_ groupID: UUID) -> CGRect? {
         guard let g = graph.node(groupID), g.kind == .promptGroup else { return nil }
-        return frameRect(members(of: groupID).map(NodeMetrics.frame), group: g)
-    }
-
-    /// Same rect EXCLUDING one node — for drop-in/out hit-testing without a member containing itself.
-    func rectExcluding(_ excluded: UUID, in groupID: UUID) -> CGRect? {
-        guard let g = graph.node(groupID), g.kind == .promptGroup else { return nil }
-        return frameRect(members(of: groupID).filter { $0.id != excluded }.map(NodeMetrics.frame), group: g)
-    }
-
-    private func frameRect(_ rects: [CGRect], group g: GraphNode) -> CGRect {
-        guard let first = rects.first else {
-            return CGRect(x: g.x, y: g.y, width: g.group?.width ?? 320, height: g.group?.height ?? 160)
-        }
-        let union = rects.dropFirst().reduce(first) { $0.union($1) }
-        let p = GraphEngine.groupPad
-        return CGRect(x: union.minX - p, y: union.minY - p - GraphEngine.groupHeader,
-                      width: union.width + p * 2, height: union.height + p * 2 + GraphEngine.groupHeader)
+        let w = max(GraphEngine.groupMinWidth, CGFloat(g.group?.width ?? 320))
+        let h = max(GraphEngine.groupMinHeight, CGFloat(g.group?.height ?? 160))
+        return CGRect(x: g.x, y: g.y, width: w, height: h)
     }
 
     /// Canvas-space anchor of a group's single "out" port (right edge of the frame, mid-height).
@@ -516,20 +511,28 @@ final class GraphEngine {
         groupRect(groupID).map { CGPoint(x: $0.maxX, y: $0.midY) }
     }
 
-    /// The GENEROUS drop zone of a group for a block being dragged — the frame (excluding that block,
-    /// so it can leave) expanded by a wide margin. The margin gives an easy catch when dropping a block
-    /// in, and hysteresis so nudging a member around inside never accidentally expels it.
-    func dropZone(_ groupID: UUID, excluding id: UUID) -> CGRect? {
-        rectExcluding(id, in: groupID).map { $0.insetBy(dx: -GraphEngine.groupDropMargin, dy: -GraphEngine.groupDropMargin) }
+    /// The tight rect enclosing a group's members (+ padding + a header band on top), or nil when it has none.
+    /// Drives the "grow the frame to fit its members" pass — never used to SHRINK the user-sized frame.
+    private func memberBounds(of groupID: UUID) -> CGRect? {
+        let rects = members(of: groupID).map(NodeMetrics.frame)
+        guard let first = rects.first else { return nil }
+        let union = rects.dropFirst().reduce(first) { $0.union($1) }
+        let p = GraphEngine.groupPad
+        return CGRect(x: union.minX - p, y: union.minY - p - GraphEngine.groupHeader,
+                      width: union.width + p * 2, height: union.height + p * 2 + GraphEngine.groupHeader)
     }
 
-    /// Which group a dragged block belongs to, by its center. Sticky: a current member stays as long as
-    /// it's within its (generous) zone, so you can freely reposition it; only a clear drag-away leaves.
+    /// Which group a dragged block belongs to, by its center against the (stable) frames. Sticky: the current
+    /// group is kept while the center stays within its frame + a hysteresis margin; otherwise the block joins
+    /// whichever frame now contains its center (or becomes free).
     func dropGroup(for id: UUID) -> UUID? {
         guard let n = graph.node(id), n.kind.isBlock else { return nil }
         let c = CGPoint(x: n.x + NodeMetrics.width(n) / 2, y: n.y + NodeMetrics.height(n) / 2)
-        if let g = n.groupID, dropZone(g, excluding: id)?.contains(c) ?? false { return g }
-        return graph.nodes.first { $0.kind == .promptGroup && (dropZone($0.id, excluding: id)?.contains(c) ?? false) }?.id
+        if let g = n.groupID,
+           groupRect(g)?.insetBy(dx: -GraphEngine.groupStickyMargin, dy: -GraphEngine.groupStickyMargin).contains(c) ?? false {
+            return g
+        }
+        return graph.nodes.first { $0.kind == .promptGroup && (groupRect($0.id)?.contains(c) ?? false) }?.id
     }
 
     /// Live during a block drag: update its group membership + the highlighted drop target.
@@ -540,6 +543,88 @@ final class GraphEngine {
         dropTargetGroup = target
     }
     func endGroupDrag() { dropTargetGroup = nil }
+
+    /// Set a group frame's size from the resize grip, clamped to a floor.
+    func resizeGroup(_ id: UUID, to size: CGSize) {
+        guard let i = index(id), graph.nodes[i].kind == .promptGroup else { return }
+        graph.nodes[i].group?.width  = Double(max(GraphEngine.groupMinWidth, size.width))
+        graph.nodes[i].group?.height = Double(max(GraphEngine.groupMinHeight, size.height))
+    }
+
+    /// Grow a group's frame so it encloses all its members (+ padding). Only ever GROWS — the user's chosen
+    /// size is a floor — so the frame stays a stable container while never visually clipping a member it owns.
+    func fitGroupFrame(_ groupID: UUID) {
+        guard let i = index(groupID), graph.nodes[i].kind == .promptGroup,
+              let bounds = memberBounds(of: groupID), let cur = groupRect(groupID) else { return }
+        let union = cur.union(bounds)
+        graph.nodes[i].x = union.minX
+        graph.nodes[i].y = union.minY
+        graph.nodes[i].group?.width  = Double(union.width)
+        graph.nodes[i].group?.height = Double(union.height)
+    }
+
+    /// One-time upgrade for graphs authored before frames were explicit: size each group's frame to the bounds
+    /// of its members so loaded/example graphs render exactly as before, now as a real (resizable) container.
+    func normalizeGroupFrames() {
+        for g in graph.nodes where g.kind == .promptGroup {
+            guard let i = index(g.id), let bounds = memberBounds(of: g.id) else { continue }
+            graph.nodes[i].x = bounds.minX
+            graph.nodes[i].y = bounds.minY
+            graph.nodes[i].group?.width  = Double(max(GraphEngine.groupMinWidth, bounds.width))
+            graph.nodes[i].group?.height = Double(max(GraphEngine.groupMinHeight, bounds.height))
+        }
+    }
+
+    // MARK: Auto-nudge (collision resolution on drop — keeps dropped/resized nodes from overlapping)
+
+    /// Called by the canvas on drag/resize end: push overlapping nodes apart (keeping the just-moved `pinned`
+    /// node(s) fixed), then grow the frames of any groups whose members shifted so they still contain them.
+    func settleLayout(after pinned: Set<UUID>) {
+        let nudged = separate(pinned: pinned)
+        let touchedGroups = Set((pinned.union(nudged)).compactMap { graph.node($0)?.groupID })
+        for g in touchedGroups { fitGroupFrame(g) }
+    }
+
+    /// Bounded relaxation: iterate node pairs, separating any that overlap (with a small gap) along their
+    /// least-penetration axis. Pinned nodes never move; between two movable nodes the push is split. Prompt
+    /// groups are containers, not collidable bodies, so they're skipped. Returns the nodes it moved.
+    @discardableResult
+    private func separate(pinned: Set<UUID>, gap: CGFloat = 16, iterations: Int = 12) -> Set<UUID> {
+        let ids = graph.nodes.filter { $0.kind != .promptGroup }.map(\.id)
+        guard ids.count > 1 else { return [] }
+        // id → index in graph.nodes. Stable for the whole call: separation only mutates positions, never the array.
+        var indexOf: [UUID: Int] = [:]
+        for (i, n) in graph.nodes.enumerated() where n.kind != .promptGroup { indexOf[n.id] = i }
+        var moved: Set<UUID> = []
+        for _ in 0..<iterations {
+            var any = false
+            for a in 0..<ids.count {
+                for b in (a + 1)..<ids.count {
+                    let ia = indexOf[ids[a]]!, ib = indexOf[ids[b]]!
+                    let ra = NodeMetrics.frame(graph.nodes[ia]).insetBy(dx: -gap / 2, dy: -gap / 2)
+                    let rb = NodeMetrics.frame(graph.nodes[ib]).insetBy(dx: -gap / 2, dy: -gap / 2)
+                    let ov = ra.intersection(rb)
+                    guard !ov.isNull, ov.width > 0.5, ov.height > 0.5 else { continue }
+                    var dx: CGFloat = 0, dy: CGFloat = 0
+                    if ov.width < ov.height { dx = (ra.midX <= rb.midX ? 1 : -1) * ov.width }
+                    else                    { dy = (ra.midY <= rb.midY ? 1 : -1) * ov.height }
+                    let aPinned = pinned.contains(ids[a]), bPinned = pinned.contains(ids[b])
+                    if aPinned && bPinned { continue }
+                    if aPinned {
+                        graph.nodes[ib].x += dx; graph.nodes[ib].y += dy; moved.insert(ids[b])
+                    } else if bPinned {
+                        graph.nodes[ia].x -= dx; graph.nodes[ia].y -= dy; moved.insert(ids[a])
+                    } else {
+                        graph.nodes[ia].x -= dx / 2; graph.nodes[ia].y -= dy / 2; moved.insert(ids[a])
+                        graph.nodes[ib].x += dx / 2; graph.nodes[ib].y += dy / 2; moved.insert(ids[b])
+                    }
+                    any = true
+                }
+            }
+            if !any { break }
+        }
+        return moved
+    }
 
     // MARK: Factories
 
