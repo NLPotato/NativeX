@@ -65,6 +65,18 @@ enum GraphValidator {
                 let name = block.title.isEmpty ? block.kind.label : block.title
                 out.append(GraphIssue(nodeID: block.id, message: "Unbound {{\(v)}} in “\(name)” — wire a value into it."))
             }
+            // Wired BUT empty: the edge exists, but its upstream static Input has no value → the block would
+            // resolve {{v}} to "" and the model runs on a blank. (Distinct from the unbound case above.)
+            for edge in graph.incoming(block.id) {
+                guard let src = graph.node(edge.fromNodeID), src.kind == .input,
+                      src.input?.source == .staticLiteral else { continue }
+                let value = (src.input?.statics[edge.outputKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if value.isEmpty {
+                    let nm = src.title.isEmpty ? src.kind.label : src.title
+                    out.append(GraphIssue(nodeID: src.id,
+                        message: "Input “\(nm)” has no value for {{\(edge.outputKey)}} — fill it in or the model runs on a blank."))
+                }
+            }
         }
         return out
     }
