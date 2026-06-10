@@ -16,12 +16,19 @@ import SwiftUI
 // MARK: - Canvas geometry (analytic anchors)
 
 enum NodeMetrics {
-    static let width: CGFloat = 216
+    static let defaultWidth: CGFloat = 216
+    static let minWidth: CGFloat = 168   // floor for a manual width resize — keeps the header/title legible
     static let header: CGFloat = 60      // icon + title row + kind/summary row
     static let portSlot: CGFloat = 26
     static let footer: CGFloat = 14
     static let portDot: CGFloat = 11
     static let previewSlot: CGFloat = 70 // body band that shows a text block's content on the card
+
+    /// Card width: the manual override (drag the resize grip), clamped to a legible floor, else the default.
+    static func width(_ n: GraphNode) -> CGFloat {
+        if let w = n.w { return max(minWidth, CGFloat(w)) }
+        return defaultWidth
+    }
 
     static func rows(_ n: GraphNode) -> Int { max(n.inputPorts.count, n.outputKeys.count, 1) }
 
@@ -56,10 +63,10 @@ enum NodeMetrics {
 
     /// Canvas-space anchor of an input port (left edge) / output port (right edge).
     static func inputAnchor(_ n: GraphNode, _ i: Int) -> CGPoint { CGPoint(x: n.x, y: n.y + rowCenterY(i)) }
-    static func outputAnchor(_ n: GraphNode, _ j: Int) -> CGPoint { CGPoint(x: n.x + width, y: n.y + rowCenterY(j)) }
+    static func outputAnchor(_ n: GraphNode, _ j: Int) -> CGPoint { CGPoint(x: n.x + width(n), y: n.y + rowCenterY(j)) }
 
     /// Canvas-space rect a single node card occupies (mirrors how GraphCanvas places it).
-    static func frame(_ n: GraphNode) -> CGRect { CGRect(x: n.x, y: n.y, width: width, height: height(n)) }
+    static func frame(_ n: GraphNode) -> CGRect { CGRect(x: n.x, y: n.y, width: width(n), height: height(n)) }
 }
 
 // MARK: - Engine
@@ -228,9 +235,11 @@ final class GraphEngine {
         if let i = index(id) { graph.nodes[i].x = p.x; graph.nodes[i].y = p.y }
     }
 
-    /// Set a node's manual card height (drag the resize grip), clamped to its content floor.
-    func resizeNode(_ id: UUID, to h: CGFloat) {
-        if let i = index(id) { graph.nodes[i].h = Double(max(NodeMetrics.minHeight(graph.nodes[i]), h)) }
+    /// Set a node's manual card size (drag the bottom-right grip), each axis clamped to its floor.
+    func resizeNode(_ id: UUID, to size: CGSize) {
+        guard let i = index(id) else { return }
+        graph.nodes[i].w = Double(max(NodeMetrics.minWidth, size.width))
+        graph.nodes[i].h = Double(max(NodeMetrics.minHeight(graph.nodes[i]), size.height))
     }
 
     /// Connect an upstream output key into a downstream input port (one edge per input port).
@@ -314,7 +323,7 @@ final class GraphEngine {
 
     /// Nearest OUTPUT port to a canvas point (for a wire dragged FROM an input port). A Prompt group's
     /// single "prompt" output anchors at its frame's right edge.
-    func hitOutputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, key: String)? {
+    func hitOutputPort(near p: CGPoint, tolerance: CGFloat = 40) -> (node: UUID, key: String)? {
         var best: (node: UUID, key: String, d: CGFloat)? = nil
         func consider(_ id: UUID, _ key: String, _ a: CGPoint) {
             let d = hypot(a.x - p.x, a.y - p.y)
@@ -426,7 +435,7 @@ final class GraphEngine {
     }
 
     /// Nearest input port whose anchor is within tolerance of a canvas point (drag-to-connect drop).
-    func hitInputPort(near p: CGPoint, tolerance: CGFloat = 26) -> (node: UUID, port: String)? {
+    func hitInputPort(near p: CGPoint, tolerance: CGFloat = 40) -> (node: UUID, port: String)? {
         var best: (node: UUID, port: String, d: CGFloat)? = nil
         for n in graph.nodes {
             for (i, port) in n.inputPorts.enumerated() {
@@ -485,7 +494,7 @@ final class GraphEngine {
     /// it's within its (generous) zone, so you can freely reposition it; only a clear drag-away leaves.
     func dropGroup(for id: UUID) -> UUID? {
         guard let n = graph.node(id), n.kind.isBlock else { return nil }
-        let c = CGPoint(x: n.x + NodeMetrics.width / 2, y: n.y + NodeMetrics.height(n) / 2)
+        let c = CGPoint(x: n.x + NodeMetrics.width(n) / 2, y: n.y + NodeMetrics.height(n) / 2)
         if let g = n.groupID, dropZone(g, excluding: id)?.contains(c) ?? false { return g }
         return graph.nodes.first { $0.kind == .promptGroup && (dropZone($0.id, excluding: id)?.contains(c) ?? false) }?.id
     }

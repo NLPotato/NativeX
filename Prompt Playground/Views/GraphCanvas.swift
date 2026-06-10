@@ -58,7 +58,7 @@ struct GraphCanvas: View {
                     EdgeHitLayer(engine: engine)
                     ForEach(engine.graph.nodes.filter { $0.kind != .promptGroup }) { node in
                         NodeCardView(engine: engine, node: node)
-                            .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
+                            .frame(width: NodeMetrics.width(node), height: NodeMetrics.height(node), alignment: .topLeading)
                             .offset(x: node.x, y: node.y)
                     }
                 }
@@ -199,7 +199,9 @@ private struct NodeCardView: View {
     let node: GraphNode
 
     @State private var moveStart: CGPoint? = nil
-    @State private var resizeStartH: CGFloat? = nil
+    @State private var resizeStart: CGSize? = nil
+    @State private var hoveredInput: String? = nil    // port currently hovered → grows its chip + dot
+    @State private var hoveredOutput: String? = nil
 
     private var run: GraphNodeRun? { engine.runs[node.id] }
     private var selected: Bool { engine.selection == node.id }
@@ -213,16 +215,12 @@ private struct NodeCardView: View {
                 portRow(row).frame(height: NodeMetrics.portSlot)
             }
             if let preview = NodeMetrics.previewText(node) {
-                Text(preview)
-                    .font(.dsMicro).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, DS.Space.md).padding(.top, 2).padding(.bottom, DS.Space.sm)
-                    .clipped()
+                promptBand(preview)
             } else {
                 Spacer(minLength: 0)
             }
         }
-        .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
+        .frame(width: NodeMetrics.width(node), height: NodeMetrics.height(node), alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -242,23 +240,27 @@ private struct NodeCardView: View {
         .gesture(moveGesture)
     }
 
-    /// A corner grip on text blocks: drag down to give a lengthy prompt more room on the card.
-    @ViewBuilder private var resizeGrip: some View {
-        if NodeMetrics.previewText(node) != nil {
-            Image(systemName: "arrow.down.right")
-                .font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
-                .frame(width: 18, height: 18)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(coordinateSpace: .named(graphBoardSpace))
-                        .onChanged { v in
-                            if resizeStartH == nil { engine.snapshot(); resizeStartH = NodeMetrics.height(node) }
-                            engine.resizeNode(node.id, to: (resizeStartH ?? 0) + v.translation.height / engine.scale)
+    /// Bottom-right corner grip: drag to freely resize the card in BOTH axes (width + height), each
+    /// clamped to its floor. Available on every node, not just text blocks.
+    private var resizeGrip: some View {
+        Image(systemName: "arrow.down.right")
+            .font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(coordinateSpace: .named(graphBoardSpace))
+                    .onChanged { v in
+                        if resizeStart == nil {
+                            engine.snapshot()
+                            resizeStart = CGSize(width: NodeMetrics.width(node), height: NodeMetrics.height(node))
                         }
-                        .onEnded { _ in resizeStartH = nil }
-                )
-                .help("Drag to resize")
-        }
+                        let s = resizeStart ?? .zero
+                        engine.resizeNode(node.id, to: CGSize(width:  s.width  + v.translation.width  / engine.scale,
+                                                              height: s.height + v.translation.height / engine.scale))
+                    }
+                    .onEnded { _ in resizeStart = nil }
+            )
+            .help("Drag to resize (width + height)")
     }
 
     private var tint: Color { kindTint(node.kind) }
@@ -304,45 +306,117 @@ private struct NodeCardView: View {
     private func portRow(_ row: Int) -> some View {
         HStack(spacing: DS.Space.sm) {
             if row < node.inputPorts.count {
-                Text(node.inputPorts[row]).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
+                let p = node.inputPorts[row]
+                varChip(p, wired: engine.isConnected(node.id, port: p), hovered: hoveredInput == p)
             }
             Spacer(minLength: 0)
             if row < node.outputKeys.count {
-                Text(node.outputKeys[row]).font(.dsMicro.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+                let k = node.outputKeys[row]
+                let outWired = engine.graph.edges.contains { $0.fromNodeID == node.id && $0.outputKey == k }
+                varChip(k, wired: outWired, hovered: hoveredOutput == k, output: true)
             }
         }
         .padding(.horizontal, DS.Space.md)
     }
 
-    // Port dots positioned at the analytic anchors (in node-local coordinates). Each dot is wireable two
-    // ways: DRAG it to the opposite port, or CLICK an output to arm then click a target input.
+    /// A port name rendered as a small monospaced "variable" pill — so it reads clearly as a wired variable,
+    /// visually distinct from the prompt prose in the band below. Tints when wired/hovered and grows on hover
+    /// (the requested "variable name gets bigger on hover" affordance).
+    private func varChip(_ name: String, wired: Bool, hovered: Bool, output: Bool = false) -> some View {
+        let active = wired || hovered
+        return Text(name)
+            .font(.system(size: 11, weight: .medium, design: .monospaced)).lineLimit(1)
+            .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, DS.Space.xs).padding(.vertical, 1)
+            .background(Capsule().fill(active ? Theme.accent.opacity(0.16) : Color.white.opacity(0.05)))
+            .overlay(Capsule().strokeBorder(active ? Theme.accent.opacity(0.4) : .white.opacity(0.08), lineWidth: 0.8))
+            .scaleEffect(hovered ? 1.08 : 1, anchor: output ? .trailing : .leading)
+            .animation(.easeOut(duration: 0.12), value: hovered)
+    }
+
+    /// The block's content shown on the card face: a recessed band (separated from the variable lane above
+    /// by a divider + darker fill) where {{var}} tokens are highlighted — so template variables read apart
+    /// from the literal prompt prose (feedback #6).
+    private func promptBand(_ text: String) -> some View {
+        highlightedPrompt(text)
+            .font(.dsMicro)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, DS.Space.md).padding(.top, DS.Space.xs).padding(.bottom, DS.Space.sm)
+            // Bottom corners match the card so the recess doesn't poke past the rounded edge.
+            .background(Color.black.opacity(0.12), in: UnevenRoundedRectangle(
+                bottomLeadingRadius: DS.Radius.md, bottomTrailingRadius: DS.Radius.md))
+            .overlay(alignment: .top) { Divider().opacity(0.3) }
+            .clipped()
+    }
+
+    /// Template text as a single concatenated Text where {{var}} tokens are tinted + monospaced. Cheap;
+    /// scoped to the small (clipped) preview band.
+    private func highlightedPrompt(_ s: String) -> Text {
+        var result = Text("")
+        var rest = Substring(s)
+        let varFont = Font.system(size: 12, weight: .semibold, design: .monospaced)
+        while let open = rest.range(of: "{{") {
+            let before = rest[rest.startIndex..<open.lowerBound]
+            if !before.isEmpty { result = result + Text(String(before)).foregroundStyle(.secondary) }
+            if let close = rest.range(of: "}}", range: open.upperBound..<rest.endIndex) {
+                let token = rest[open.lowerBound..<close.upperBound]   // includes the {{ }}
+                result = result + Text(String(token)).font(varFont).foregroundStyle(Theme.accent)
+                rest = rest[close.upperBound...]
+            } else {
+                result = result + Text(String(rest[open.lowerBound...])).foregroundStyle(.secondary)
+                return result
+            }
+        }
+        if !rest.isEmpty { result = result + Text(String(rest)).foregroundStyle(.secondary) }
+        return result
+    }
+
+    // Each port has a WIDE transparent grab zone (covering the dot + its variable chip), not just the 11pt
+    // dot — so a wire can be started by dragging anywhere along the port. The visual dot sits at the exact
+    // analytic anchor (so edges line up) and is non-interactive; hover/arm state drives its glow + growth.
     private var portDots: some View {
-        ZStack(alignment: .topLeading) {
+        let w = NodeMetrics.width(node)
+        let half = max(40, w / 2 - DS.Space.sm)   // grab-zone width per side; never reaches the opposite side
+        return ZStack(alignment: .topLeading) {
             ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, port in
                 // Neon fill = wired. While a wire is armed (or this port is mid input-drag), every input
                 // lights up as a candidate target.
                 let wired = engine.isConnected(node.id, port: port)
                 let candidate = engine.armedFrom != nil
                     || (engine.pendingFromInput?.node == node.id && engine.pendingFromInput?.port == port)
-                PortDotView(filled: wired, tint: wired ? Theme.accent : .secondary, active: candidate)
-                    .position(x: 0, y: NodeMetrics.rowCenterY(i))
+                let y = NodeMetrics.rowCenterY(i)
+                Color.clear
+                    .frame(width: half, height: NodeMetrics.portSlot)
+                    .contentShape(Rectangle())
+                    .position(x: half / 2 - 6, y: y)   // hangs ~6pt past the left edge so the dot sits inside
+                    .onHover { hoveredInput = $0 ? port : (hoveredInput == port ? nil : hoveredInput) }
                     .gesture(inputConnectGesture(port: port))
                     .onTapGesture(count: 2) { engine.snapshot(); engine.disconnect(to: node.id, port: port) }
                     .onTapGesture { if !engine.completeArm(to: node.id, port: port) { engine.selection = node.id } }
                     .help(engine.armedFrom != nil
                           ? "Click to connect the armed wire here"
                           : "Drag to an output, or double-click to disconnect")
+                PortDotView(filled: wired, tint: wired ? Theme.accent : .secondary,
+                            active: candidate || hoveredInput == port)
+                    .position(x: 0, y: y).allowsHitTesting(false)
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
                 let armed = engine.armedFrom.map { $0.node == node.id && $0.key == key } ?? false
-                PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary, active: armed)
-                    .position(x: NodeMetrics.width, y: NodeMetrics.rowCenterY(j))
+                let y = NodeMetrics.rowCenterY(j)
+                Color.clear
+                    .frame(width: half, height: NodeMetrics.portSlot)
+                    .contentShape(Rectangle())
+                    .position(x: w - half / 2 + 6, y: y)
+                    .onHover { hoveredOutput = $0 ? key : (hoveredOutput == key ? nil : hoveredOutput) }
                     .gesture(connectGesture(key: key))
                     .onTapGesture { engine.armOutput(node: node.id, key: key) }
                     .help("Drag to an input, or click to arm then click a target input")
+                PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary,
+                            active: armed || hoveredOutput == key)
+                    .position(x: w, y: y).allowsHitTesting(false)
             }
         }
-        .frame(width: NodeMetrics.width, height: NodeMetrics.height(node), alignment: .topLeading)
+        .frame(width: w, height: NodeMetrics.height(node), alignment: .topLeading)
     }
 
     private var borderColor: Color {
@@ -443,23 +517,19 @@ private struct NodeCardView: View {
     }
 }
 
-/// A wireable port dot that grows on hover (or while it's an armed/candidate target). Gestures + taps
-/// are attached by the caller; this view owns only the visual + the (generous) hit shape.
+/// The visual port dot — purely a marker at the analytic anchor; it grows + lights up when `active`
+/// (hovered/armed/candidate). Hit-testing lives on the wide grab zone in `portDots`, not here.
 private struct PortDotView: View {
     let filled: Bool
     let tint: Color
     let active: Bool
-    @State private var hover = false
 
     var body: some View {
         Circle()
             .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
             .overlay(Circle().strokeBorder(active ? Theme.accent : tint, lineWidth: active ? 2 : 1.5))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
-            .scaleEffect((hover || active) ? 1.4 : 1)
-            .contentShape(Circle().inset(by: -10))   // generous hit target (was -6)
-            .onHover { hover = $0 }
-            .animation(.easeOut(duration: 0.12), value: hover)
+            .scaleEffect(active ? 1.4 : 1)
             .animation(.easeOut(duration: 0.12), value: active)
     }
 }
