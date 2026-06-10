@@ -9,9 +9,13 @@
 //
 
 import SwiftUI
+import SwiftData
 import AppKit
 
 let graphBoardSpace = "graphboard"
+
+/// Identifiable wrapper so a bare node UUID can drive a `.sheet(item:)` (the compare config sheet).
+private struct CanvasSheetID: Identifiable { let id: UUID }
 
 /// Per-kind accent so the board reads as a typed pipeline at a glance rather than a wall of grey. Calm,
 /// distinct hues (not neon) — used on the node icon, a faint header wash, and the selected border/glow.
@@ -35,9 +39,23 @@ func kindTint(_ kind: NodeKind) -> Color {
 struct GraphCanvas: View {
     @Bindable var engine: GraphEngine
     var onRun: () -> Void = {}            // logs the finished run to Run History (GraphView.persistRun)
+    var batch: GraphBatchRunner? = nil    // dataset batch lane (non-nil ⇒ an Input is dataset-bound)
+    var boundDataset: DatasetModel? = nil
+    var onRunDataset: () -> Void = {}
+    var onOpenLab: () -> Void = {}        // batch summary "View in Lab" → switch to the Lab tab
 
     @State private var panStart: CGSize? = nil
     @State private var zoomStart: CGFloat? = nil
+
+    /// The compare node the current result belongs to (matches by referenced lane group ids) — anchors the
+    /// on-canvas lane cards beneath it.
+    private var compareAnchor: GraphNode? {
+        guard let outcome = engine.compareOutcome else { return nil }
+        let laneIDs = Set(outcome.lanes.map(\.id))
+        return engine.graph.nodes.first {
+            $0.kind == .compare && !Set($0.compare?.laneGroupIDs ?? []).isDisjoint(with: laneIDs)
+        }
+    }
 
     var body: some View {
         // GeometryReader + explicit frame so the huge edge Canvas (below) can't drive the pane's
@@ -47,7 +65,7 @@ struct GraphCanvas: View {
                 // Background — captures pan / zoom / deselect.
                 Color(nsColor: .underPageBackgroundColor)
                     .contentShape(Rectangle())
-                    .onTapGesture { engine.selection = nil; engine.selectedEdge = nil; engine.cancelArm() }
+                    .onTapGesture { engine.clearSelection(); engine.selectedEdge = nil; engine.cancelArm() }
                     .gesture(pan)
                     .simultaneousGesture(zoom)
 
@@ -61,6 +79,31 @@ struct GraphCanvas: View {
                         NodeCardView(engine: engine, node: node)
                             .frame(width: NodeMetrics.width(node), height: NodeMetrics.height(node), alignment: .topLeading)
                             .offset(x: node.x, y: node.y)
+                            // Hover/selection lift the card above overlapping neighbors — z-order only, so the
+                            // analytic port anchors don't move and wires stay glued (never .scaleEffect the card).
+                            .zIndex(engine.hoveredNode == node.id ? 3 : (engine.selection == node.id ? 2 : 0))
+                    }
+                    // Single-run result: a white, full-opacity card beside the terminal FM (NOT a graph node;
+                    // view-only, never in GraphDef / topo / exec). Lives in the scaled layer so it pans+zooms.
+                    if let fm = engine.terminalFM, let text = engine.singleRunOutput, !engine.resultCardDismissed {
+                        let f = NodeMetrics.frame(fm)
+                        CanvasResultCard(engine: engine, text: text)
+                            .offset(x: f.maxX + 28 + engine.resultCardOffset.width,
+                                    y: f.minY + engine.resultCardOffset.height)
+                            .zIndex(5)
+                    }
+                    // Compare results: side-by-side lane cards beneath the compare node (view-only overlay),
+                    // tethered to the node by a dashed connector so the link is unmistakable.
+                    if let outcome = engine.compareOutcome, let anchor = compareAnchor {
+                        let cf = NodeMetrics.frame(anchor)
+                        let off = engine.compareCardsOffset
+                        let top = CGPoint(x: cf.minX + off.width, y: cf.maxY + 22 + off.height)
+                        CompareLinkLine(from: CGPoint(x: cf.midX, y: cf.maxY),
+                                        to: CGPoint(x: top.x + 26, y: top.y))
+                            .zIndex(5)
+                        CompareResultCluster(engine: engine, outcome: outcome)
+                            .offset(x: top.x, y: top.y)
+                            .zIndex(6)
                     }
                 }
                 .scaleEffect(engine.scale, anchor: .topLeading)
@@ -75,11 +118,28 @@ struct GraphCanvas: View {
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
             // The primary action — a prominent accent Run pill in the bottom-left corner (⌘↩), pulled out
             // of the top toolbar so the most important command lives on the canvas and stands out.
-            .overlay(alignment: .bottomLeading) { CanvasRunControl(engine: engine, onRun: onRun).padding(DS.Space.lg) }
+            .overlay(alignment: .bottomLeading) {
+                CanvasRunControl(engine: engine, onRun: onRun, batch: batch,
+                                 boundDataset: boundDataset, onRunDataset: onRunDataset).padding(DS.Space.lg)
+            }
             // Figma/Photoshop-style floating bar — actions for the current selection, pinned bottom-center.
             .overlay(alignment: .bottom) { CanvasContextBar(engine: engine).padding(.bottom, DS.Space.lg) }
             // Zoom control in the corner (Figma/Adobe convention) — keeps the top toolbar uncluttered.
             .overlay(alignment: .bottomTrailing) { CanvasZoomControl(engine: engine).padding(DS.Space.lg) }
+            // Live run feedback: the executing node (top-center pill) + run errors (top-right toast).
+            .overlay(alignment: .top) { CanvasRunningPill(engine: engine).padding(.top, DS.Space.lg) }
+            .overlay(alignment: .topTrailing) { CanvasErrorToast(engine: engine).padding(DS.Space.lg) }
+            // Batch completion summary (top-left), deep-linking to the Lab sweep.
+            .overlay(alignment: .topLeading) {
+                if let batch { CanvasBatchSummaryCard(batch: batch, onOpenLab: onOpenLab).padding(DS.Space.lg) }
+            }
+            // Compare config sheet — opened by double-clicking a .compare node (clear guidance + lanes + Run).
+            .sheet(item: Binding(
+                get: { engine.compareConfigFor.map(CanvasSheetID.init) },
+                set: { engine.compareConfigFor = $0?.id }
+            )) { item in
+                CompareConfigSheet(engine: engine, nodeID: item.id)
+            }
         }
     }
 
@@ -202,13 +262,16 @@ private struct NodeCardView: View {
     @Bindable var engine: GraphEngine
     let node: GraphNode
 
-    @State private var moveStart: CGPoint? = nil
+    @State private var dragStarts: [UUID: CGPoint]? = nil   // start positions for a (possibly multi-) node drag
     @State private var resizeStart: CGSize? = nil
     @State private var hoveredInput: String? = nil    // port currently hovered → grows its chip + dot
     @State private var hoveredOutput: String? = nil
+    @State private var editingTitle = false
+    @FocusState private var titleFocused: Bool
 
     private var run: GraphNodeRun? { engine.runs[node.id] }
-    private var selected: Bool { engine.selection == node.id }
+    private var selected: Bool { engine.isNodeSelected(node.id) }   // primary OR part of a multi-selection
+    private var nodeHovered: Bool { engine.hoveredNode == node.id }
     private var issues: [GraphIssue] { engine.issues(for: node.id) }   // pre-run structural problems
 
     var body: some View {
@@ -233,14 +296,22 @@ private struct NodeCardView: View {
         )
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
             .strokeBorder(borderColor, lineWidth: selected ? 2.5 : 1))
-        .overlay { if run?.status == .running { RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Theme.lime, lineWidth: 2).opacity(0.9) } }
+        .runningRadiance(active: run?.status == .running, corner: DS.Radius.md)   // the running node blooms
         .shadow(color: selected ? tint.opacity(0.55) : .black.opacity(0.28),
                 radius: selected ? 12 : 4, y: selected ? 0 : 2)   // selected node lifts off the board
         .overlay(alignment: .topLeading) { portDots }
         .overlay(alignment: .bottomTrailing) { resizeGrip }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { engine.selection = node.id; engine.showInspector = true }
-        .onTapGesture { engine.selection = node.id }
+        .onHover { engine.hoveredNode = $0 ? node.id : (engine.hoveredNode == node.id ? nil : engine.hoveredNode) }
+        .onTapGesture(count: 2) {
+            engine.selectOnly(node.id)
+            // Compare nodes open a clear config sheet (not the generic inspector) — guidance + lanes + Run.
+            if node.kind == .compare { engine.compareConfigFor = node.id } else { engine.showInspector = true }
+        }
+        .onTapGesture {
+            // Shift+click extends the selection (multi-select); a plain click replaces it.
+            if NSEvent.modifierFlags.contains(.shift) { engine.toggleSelect(node.id) } else { engine.selectOnly(node.id) }
+        }
         .gesture(moveGesture)
     }
 
@@ -276,13 +347,21 @@ private struct NodeCardView: View {
                 .foregroundStyle(tint)                  // each kind's hue rides on its icon
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(node.title.isEmpty ? node.kind.label : node.title)
-                    .font(.dsLabel).lineLimit(1).foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.9)))
-                if let preview = runPreview {
-                    Text(preview).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
+                // Line 1: the distinguishing NAME — user title, else a computed default. Double-click to rename.
+                if editingTitle {
+                    TextField("", text: titleBinding)
+                        .textFieldStyle(.plain).font(.dsLabel).lineLimit(1).focused($titleFocused)
+                        .onSubmit { editingTitle = false }
+                        .onChange(of: titleFocused) { _, f in if !f { editingTitle = false } }
                 } else {
-                    Text(faceSummary).font(.dsMicro).foregroundStyle(faceTint).lineLimit(1)
+                    Text(displayTitle)
+                        .font(.dsLabel).lineLimit(1)
+                        .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.9)))
+                        .onTapGesture(count: 2) { startTitleEdit() }
                 }
+                // Line 2: the STATIC node-type label ("Input", "Foundation Model", …). No third row — the
+                // node body band already previews content, and the result card shows the run output.
+                Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             statusDot
@@ -334,8 +413,9 @@ private struct NodeCardView: View {
             .padding(.horizontal, DS.Space.xs).padding(.vertical, 1)
             .background(Capsule().fill(active ? Theme.accent.opacity(0.16) : Color.white.opacity(0.05)))
             .overlay(Capsule().strokeBorder(active ? Theme.accent.opacity(0.4) : .white.opacity(0.08), lineWidth: 0.8))
-            .scaleEffect(hovered ? 1.08 : 1, anchor: output ? .trailing : .leading)
+            .scaleEffect(hovered ? 1.12 : (nodeHovered ? 1.05 : 1), anchor: output ? .trailing : .leading)
             .animation(.easeOut(duration: 0.12), value: hovered)
+            .animation(.easeOut(duration: 0.12), value: nodeHovered)
     }
 
     /// The block's content shown on the card face: a recessed band (separated from the variable lane above
@@ -343,11 +423,11 @@ private struct NodeCardView: View {
     /// from the literal prompt prose (feedback #6).
     private func promptBand(_ text: String) -> some View {
         Text(highlightedPrompt(text))
-            .font(.dsMicro).foregroundStyle(.secondary)   // prose tone; {{var}} runs override with accent
+            .font(.dsMicro).foregroundStyle(.primary.opacity(0.85))   // brighter prose; {{var}} runs override with accent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, DS.Space.md).padding(.top, DS.Space.xs).padding(.bottom, DS.Space.sm)
             // Bottom corners match the card so the recess doesn't poke past the rounded edge.
-            .background(Color.black.opacity(0.12), in: UnevenRoundedRectangle(
+            .background(Color.black.opacity(0.24), in: UnevenRoundedRectangle(
                 bottomLeadingRadius: DS.Radius.md, bottomTrailingRadius: DS.Radius.md))
             .overlay(alignment: .top) { Divider().opacity(0.3) }
             .clipped()
@@ -384,7 +464,7 @@ private struct NodeCardView: View {
     // analytic anchor (so edges line up) and is non-interactive; hover/arm state drives its glow + growth.
     private var portDots: some View {
         let w = NodeMetrics.width(node)
-        let half = max(40, w / 2 - DS.Space.sm)   // grab-zone width per side; never reaches the opposite side
+        let half = max(40, w / 2 - DS.Space.sm) + (nodeHovered ? 16 : 0)   // grab-zone width per side; fatter while hovering this node
         return ZStack(alignment: .topLeading) {
             ForEach(Array(node.inputPorts.enumerated()), id: \.offset) { i, port in
                 // Neon fill = wired. While a wire is armed (or this port is mid input-drag), every input
@@ -396,7 +476,6 @@ private struct NodeCardView: View {
                 Color.clear
                     .frame(width: half, height: NodeMetrics.portSlot)
                     .contentShape(Rectangle())
-                    .position(x: half / 2 - 6, y: y)   // hangs ~6pt past the left edge so the dot sits inside
                     .onHover { hoveredInput = $0 ? port : (hoveredInput == port ? nil : hoveredInput) }
                     .gesture(inputConnectGesture(port: port))
                     .onTapGesture(count: 2) { engine.snapshot(); engine.disconnect(to: node.id, port: port) }
@@ -404,8 +483,12 @@ private struct NodeCardView: View {
                     .help(engine.armedFrom != nil
                           ? "Click to connect the armed wire here"
                           : "Drag to an output, or double-click to disconnect")
+                    // .position LAST: onHover/gestures scope to THIS port's small frame. (After .position the
+                    // view fills the parent, so every input's hover fired across the whole card → only the
+                    // topmost port ever lit up. Hangs ~6pt past the left edge so the dot sits inside.)
+                    .position(x: half / 2 - 6, y: y)
                 PortDotView(filled: wired, tint: wired ? Theme.accent : .secondary,
-                            active: candidate || hoveredInput == port)
+                            active: candidate || hoveredInput == port, enlarged: nodeHovered)
                     .position(x: 0, y: y).allowsHitTesting(false)
             }
             ForEach(Array(node.outputKeys.enumerated()), id: \.offset) { j, key in
@@ -414,13 +497,13 @@ private struct NodeCardView: View {
                 Color.clear
                     .frame(width: half, height: NodeMetrics.portSlot)
                     .contentShape(Rectangle())
-                    .position(x: w - half / 2 + 6, y: y)
                     .onHover { hoveredOutput = $0 ? key : (hoveredOutput == key ? nil : hoveredOutput) }
                     .gesture(connectGesture(key: key))
                     .onTapGesture { engine.armOutput(node: node.id, key: key) }
                     .help("Drag to an input — drag again to fan this variable out to more inputs. Or click to arm, then click a target.")
+                    .position(x: w - half / 2 + 6, y: y)   // .position LAST (see input port note above)
                 PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary,
-                            active: armed || hoveredOutput == key)
+                            active: armed || hoveredOutput == key, enlarged: nodeHovered)
                     .position(x: w, y: y).allowsHitTesting(false)
             }
         }
@@ -436,58 +519,48 @@ private struct NodeCardView: View {
         }
     }
 
-    private var faceSummary: String {
-        switch node.kind {
-        case .instruction: return "system"
-        case .fewshot:     return "\(node.fewshot?.shots.count ?? 0) example(s)"
-        case .history:     return node.history?.role.label ?? "turn"
-        case .current:     return "live turn"
-        case .guided:      return node.guided?.schemaDef?.typeName ?? "no schema"
-        case .tool:        return node.tool?.name.isEmpty ?? true ? "tool" : (node.tool?.name ?? "tool")
-        case .input:       return node.input?.source.label ?? "static"
-        case .nativeAPI, .hook: return node.hook?.op.displayName ?? node.kind.label
-        case .fm:          return node.fm?.config.sampling.label ?? "default"
-        case .promptGroup: return "prompt"
-        case .compare:     return "\(node.compare?.laneGroupIDs.count ?? 0) lane(s)"
+    /// Display name: the user's title, else a computed default (schema name for guided, else Kind_N).
+    private var displayTitle: String { node.title.isEmpty ? engine.defaultTitle(for: node) : node.title }
+
+    /// Writes the title straight into the graph node (same index-write the inspector uses).
+    private var titleBinding: Binding<String> {
+        Binding(
+            get: { node.title },
+            set: { v in
+                if let i = engine.graph.nodes.firstIndex(where: { $0.id == node.id }) { engine.graph.nodes[i].title = v }
+            })
+    }
+
+    /// Enter inline rename: snapshot once for undo, seed the field with the shown default so editing
+    /// starts from what's on screen, then focus.
+    private func startTitleEdit() {
+        engine.snapshot()
+        if node.title.isEmpty, let i = engine.graph.nodes.firstIndex(where: { $0.id == node.id }) {
+            engine.graph.nodes[i].title = engine.defaultTitle(for: node)
         }
-    }
-
-    /// Cyan flags a schema-bearing guided block at a glance; everything else is quiet secondary.
-    private var faceTint: Color {
-        (node.kind == .guided && node.guided?.schemaDef != nil) ? Theme.cyan : .secondary
-    }
-
-    /// After a successful run, the card subtitle peeks at the node's primary output (one line).
-    private var runPreview: String? {
-        guard run?.status == .ok, let outputs = run?.outputs, let key = primaryOutputKey else { return nil }
-        let raw = (outputs[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-        let flat = raw.replacingOccurrences(of: "\n", with: " ")
-        return flat.count > 44 ? String(flat.prefix(44)) + "…" : flat
-    }
-
-    /// The output key whose value best represents the node after a run.
-    private var primaryOutputKey: String? {
-        switch node.kind {
-        case .fm:               return "output"
-        case .input:            return node.inputVarNames.first
-        case .nativeAPI, .hook: return node.hook.map { $0.outputVar.isEmpty ? "output" : $0.outputVar }
-        default:                return node.blockOutputKey
-        }
+        editingTitle = true
+        DispatchQueue.main.async { titleFocused = true }
     }
 
     private var moveGesture: some Gesture {
         DragGesture(coordinateSpace: .named(graphBoardSpace))
             .onChanged { v in
-                if moveStart == nil { engine.snapshot(); moveStart = CGPoint(x: node.x, y: node.y); engine.selection = node.id }
-                let s = moveStart ?? .zero
-                engine.move(node.id, to: CGPoint(x: s.x + v.translation.width / engine.scale,
-                                                 y: s.y + v.translation.height / engine.scale))
-                if node.kind.isBlock { engine.updateGroupDrag(node.id) }   // live join/leave + "+" highlight
+                if dragStarts == nil {
+                    engine.snapshot()
+                    if !engine.isNodeSelected(node.id) { engine.selectOnly(node.id) }   // drag an unselected node → select it
+                    // Move the whole multi-selection together; otherwise just this node.
+                    let ids: Set<UUID> = engine.selectedSet.count > 1 ? engine.selectedIDs : [node.id]
+                    dragStarts = Dictionary(uniqueKeysWithValues:
+                        ids.compactMap { id in engine.graph.node(id).map { (id, CGPoint(x: $0.x, y: $0.y)) } })
+                }
+                let dx = v.translation.width / engine.scale, dy = v.translation.height / engine.scale
+                for (id, s) in dragStarts ?? [:] { engine.move(id, to: CGPoint(x: s.x + dx, y: s.y + dy)) }
+                if node.kind.isBlock, (dragStarts?.count ?? 0) <= 1 { engine.updateGroupDrag(node.id) }   // single-block join/leave
             }
             .onEnded { _ in
-                moveStart = nil; engine.endGroupDrag()
-                engine.settleLayout(after: [node.id])   // push aside anything this drop overlaps; refit its group
+                let moved = Set((dragStarts ?? [:]).keys)
+                dragStarts = nil; engine.endGroupDrag()
+                engine.settleLayout(after: moved.isEmpty ? [node.id] : moved)   // push aside overlaps; refit groups
             }
     }
 
@@ -534,14 +607,16 @@ private struct PortDotView: View {
     let filled: Bool
     let tint: Color
     let active: Bool
+    var enlarged: Bool = false   // node-level hover: grow every dot so ports are easier to grab
 
     var body: some View {
         Circle()
             .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
             .overlay(Circle().strokeBorder(active ? Theme.accent : tint, lineWidth: active ? 2 : 1.5))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
-            .scaleEffect(active ? 1.4 : 1)
+            .scaleEffect(active ? 1.4 : (enlarged ? 1.25 : 1))
             .animation(.easeOut(duration: 0.12), value: active)
+            .animation(.easeOut(duration: 0.12), value: enlarged)
     }
 }
 
@@ -820,10 +895,20 @@ private struct CanvasContextBar: View {
 private struct CanvasRunControl: View {
     @Bindable var engine: GraphEngine
     let onRun: () -> Void
+    var batch: GraphBatchRunner? = nil
+    var boundDataset: DatasetModel? = nil
+    var onRunDataset: () -> Void = {}
 
     private var disabled: Bool { engine.isRunning || engine.graph.nodes.isEmpty }
 
     var body: some View {
+        HStack(spacing: DS.Space.sm) {
+            runPill
+            if let batch { datasetControl(batch) }   // present only when an Input is dataset-bound
+        }
+    }
+
+    private var runPill: some View {
         Button { Task { await engine.run(); onRun() } } label: {
             HStack(spacing: DS.Space.xs) {
                 if engine.isRunning {
@@ -843,6 +928,146 @@ private struct CanvasRunControl: View {
         .disabled(disabled)
         .keyboardShortcut(.return, modifiers: .command)
         .help(engine.graph.nodes.isEmpty ? "Add nodes, then Run (⌘↩)" : "Run the graph (⌘↩)")
+    }
+
+    /// The dataset batch lane, unified onto the canvas beside Run (was a separate toolbar button). Shows
+    /// row progress + Stop while running; a "Run dataset" pill otherwise.
+    @ViewBuilder private func datasetControl(_ batch: GraphBatchRunner) -> some View {
+        if batch.isRunning {
+            HStack(spacing: DS.Space.xs) {
+                ProgressView().controlSize(.small)
+                Text("Row \(batch.completed)/\(batch.total)").font(.dsCaption).monospacedDigit()
+                Button { batch.cancel() } label: { Image(systemName: "stop.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.red).help("Stop the batch run")
+            }
+            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+        } else {
+            Button { onRunDataset() } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "square.stack.3d.down.right.fill").font(.system(size: 11, weight: .semibold))
+                    Text("Run dataset").font(.dsCaption.weight(.medium))
+                }
+                .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled || boundDataset == nil)
+            .help(boundDataset == nil ? "Bind the Input to a dataset first"
+                                      : "Run the graph over every dataset row → a Lab experiment")
+        }
+    }
+}
+
+// MARK: - Batch summary card
+
+/// On-board summary of a finished batch run (rows · ok/err · avg latency · decode %), with a deep link to
+/// the Lab sweep (switches to the Lab tab). Dismissible. View-only. (Phase 5.)
+private struct CanvasBatchSummaryCard: View {
+    @Bindable var batch: GraphBatchRunner
+    let onOpenLab: () -> Void
+
+    var body: some View {
+        ZStack {
+            if let s = batch.lastSummary, !batch.isRunning {
+                VStack(alignment: .leading, spacing: DS.Space.sm) {
+                    HStack(spacing: DS.Space.xs) {
+                        Image(systemName: "square.stack.3d.down.right.fill").font(.dsCaption).foregroundStyle(Theme.accent)
+                        Text("Batch complete").font(.dsCaption.weight(.bold))
+                        Spacer(minLength: DS.Space.lg)
+                        Button { batch.lastSummary = nil } label: { Image(systemName: "xmark").font(.dsMicro) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).help("Dismiss")
+                    }
+                    HStack(spacing: DS.Space.md) {
+                        stat("\(s.rows)", "rows")
+                        stat("\(s.ok)", "ok", tint: .dsSuccess)
+                        stat("\(s.errors)", "err", tint: s.errors > 0 ? .dsDanger : .secondary)
+                        stat("\(s.avgMs)ms", "avg")
+                        stat("\(Int((s.decodePct * 100).rounded()))%", "decoded")
+                    }
+                    Button { onOpenLab() } label: {
+                        Label("View in Lab", systemImage: "chart.bar.doc.horizontal").font(.dsCaption)
+                    }
+                    .buttonStyle(.borderless).tint(Theme.accent)
+                }
+                .padding(DS.Space.md).frame(width: 340, alignment: .leading)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.md))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Theme.accent.opacity(0.35)))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: batch.lastSummary?.experimentID)
+    }
+
+    private func stat(_ value: String, _ label: String, tint: Color = .primary) -> some View {
+        VStack(spacing: 1) {
+            Text(value).font(.dsCaption.weight(.bold)).foregroundStyle(tint).monospacedDigit()
+            Text(label).font(.dsMicro).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Live run feedback (running-node pill + error toast)
+
+/// "Dynamic Island"-style pill, top-center, naming the node currently executing (a sequential run ⇒ one
+/// at a time). Derives the running node from `engine.runs` — no extra engine state.
+private struct CanvasRunningPill: View {
+    @Bindable var engine: GraphEngine
+
+    private var runningNode: GraphNode? {
+        engine.runs.first { $0.value.status == .running }.flatMap { engine.graph.node($0.key) }
+    }
+
+    var body: some View {
+        ZStack {
+            if engine.isRunning, let n = runningNode {
+                HStack(spacing: DS.Space.sm) {
+                    ProgressView().controlSize(.small)
+                    Image(systemName: n.kind.symbol).font(.dsCaption).foregroundStyle(Theme.accent)
+                    Text("Running \(n.title.isEmpty ? engine.defaultTitle(for: n) : n.title)")
+                        .font(.dsCaption.weight(.medium)).lineLimit(1)
+                }
+                .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45)))
+                .shadow(color: Theme.accent.opacity(0.3), radius: 10, y: 3)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: engine.isRunning)
+    }
+}
+
+/// Run errors surface as a dismissible top-right toast (auto-clears after a few seconds), replacing the
+/// old toolbar label so failures show on the canvas where the work happens.
+private struct CanvasErrorToast: View {
+    @Bindable var engine: GraphEngine
+
+    var body: some View {
+        ZStack {
+            if let err = engine.runError {
+                HStack(alignment: .top, spacing: DS.Space.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.dsDanger).font(.dsCaption)
+                    Text(err).font(.dsCaption).foregroundStyle(.primary).lineLimit(4)
+                        .frame(maxWidth: 300, alignment: .leading).textSelection(.enabled)
+                    Button { engine.runError = nil } label: { Image(systemName: "xmark").font(.dsMicro) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.md))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Color.dsDanger.opacity(0.45)))
+                .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: err) {
+                    try? await Task.sleep(for: .seconds(6))
+                    engine.runError = nil
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: engine.runError)
     }
 }
 

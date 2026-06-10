@@ -45,7 +45,7 @@ struct CompareResultView: View {
             } else {
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: DS.Space.md) {
-                        ForEach(outcome.lanes) { lane in laneColumn(lane) }
+                        ForEach(outcome.lanes) { lane in CompareLaneCard(lane: lane) }
                     }
                     .padding(DS.Space.lg)
                 }
@@ -54,7 +54,16 @@ struct CompareResultView: View {
         .frame(minWidth: 680, minHeight: 460)
     }
 
-    private func laneColumn(_ lane: CompareLaneResult) -> some View {
+}
+
+/// One lane's result — status + scrollable output + latency/token (and decode % for batch) badges. Shared
+/// by the modal CompareResultView and the on-canvas CompareResultCluster (Phase 6).
+struct CompareLaneCard: View {
+    let lane: CompareLaneResult
+    var width: CGFloat = 300
+    var outputHeight: CGFloat = 280
+
+    var body: some View {
         // Dataset mode: metrics are per-lane means and the body is row 1's output (a sample).
         let batch = lane.rowCount != 1
         return VStack(alignment: .leading, spacing: DS.Space.sm) {
@@ -74,14 +83,14 @@ struct CompareResultView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(DS.Space.sm).codeSurface()
             }
-            .frame(height: 280)
+            .frame(height: outputHeight)
             HStack(spacing: DS.Space.md) {
                 metric("\(batch ? "avg " : "")\(lane.ms) ms")
                 metric("~\(lane.promptTokens) prompt")
                 metric("~\(lane.outputTokens) out")
             }
         }
-        .frame(width: 300)
+        .frame(width: width)
         .dsCard()
     }
 
