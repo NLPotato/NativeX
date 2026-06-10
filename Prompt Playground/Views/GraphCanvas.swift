@@ -21,13 +21,13 @@ func kindTint(_ kind: NodeKind) -> Color {
     case .instruction: return .blue
     case .fewshot:     return .indigo
     case .history:     return .purple
-    case .current:     return .teal
-    case .guided:      return Theme.cyan
+    case .current:     return .pink
+    case .guided:      return .white
     case .tool:        return .orange
-    case .input:       return .green
-    case .nativeAPI:   return .mint
+    case .input:       return .gray
+    case .nativeAPI:   return Theme.cyan
     case .hook:        return .brown
-    case .fm:          return .pink
+    case .fm:          return Theme.accent
     case .compare:     return .yellow
     }
 }

@@ -18,7 +18,7 @@ enum Theme {
 
     /// Neon-green hero accent — vivid like the gummy bear but deep enough to stay legible
     /// under white control labels. Keep this in sync with Assets.xcassets/AccentColor.
-    static let accent = Color(.displayP3, red: 0.33, green: 0.80, blue: 0.20)
+    static let accent = Color(.displayP3, red: 0.457, green: 0.985, blue: 0.298) // #0FFF50
 
     /// Soft charcoal backdrop — dark enough that the neon-green accent pops, but not pure black.
     /// A subtle green→cool shift across the gradient ties it back to the icon's hues.
