@@ -14,6 +14,16 @@ import Foundation
 import SwiftData
 import Observation
 
+/// Aggregate of a finished batch run — drives the on-canvas summary card (Phase 5).
+struct BatchSummary: Sendable {
+    var rows: Int
+    var ok: Int
+    var errors: Int
+    var avgMs: Int
+    var decodePct: Double
+    var experimentID: UUID
+}
+
 @MainActor
 @Observable
 final class GraphBatchRunner {
@@ -21,6 +31,7 @@ final class GraphBatchRunner {
     var total = 0
     var completed = 0
     var currentLabel = ""
+    var lastSummary: BatchSummary? = nil   // set on completion → drives the on-canvas summary card
     private var cancelRequested = false
 
     var progress: Double { total == 0 ? 0 : Double(completed) / Double(total) }
@@ -31,7 +42,7 @@ final class GraphBatchRunner {
     func run(graph: GraphDef, dataset: DatasetModel, graphName: String,
              context: ModelContext) async -> ExperimentModel? {
         guard !isRunning else { return nil }
-        isRunning = true; cancelRequested = false; completed = 0
+        isRunning = true; cancelRequested = false; completed = 0; lastSummary = nil
         defer { isRunning = false; currentLabel = "" }
 
         // Re-resolve the dataset Input's columns from the LIVE dataset. The node's `datasetColumns` is a
@@ -54,11 +65,13 @@ final class GraphBatchRunner {
             schemaID: "graph", genConfig: GenConfig(), datasetName: dataset.name)
         context.insert(experiment)
 
+        var okCount = 0, errCount = 0, msSum = 0, decodedCount = 0
         for example in examples {
             if cancelRequested { break }
             currentLabel = example.label
 
             let data: RunResultData
+            var rowOK = true
             do {
                 let result = try await GraphExecutor.run(graph, row: example.rowValues)
                 data = result.asRunResultData()
@@ -71,7 +84,11 @@ final class GraphBatchRunner {
                 let (type, text) = classify(error)
                 data = RunResultData(outputJSON: "", turnsJSON: nil, errorText: text,
                                      metrics: .failure(type, latencyMs: 0))
+                rowOK = false
             }
+            if rowOK { okCount += 1 } else { errCount += 1 }
+            msSum += data.metrics.latencyMs
+            if data.metrics.decoded { decodedCount += 1 }
 
             var metrics = data.metrics
             if !example.expectedOutput.isEmpty {
@@ -90,6 +107,11 @@ final class GraphBatchRunner {
 
         experiment.status = cancelRequested ? "cancelled" : "done"
         try? context.save()
+        let done = okCount + errCount
+        lastSummary = BatchSummary(rows: done, ok: okCount, errors: errCount,
+                                   avgMs: done == 0 ? 0 : msSum / done,
+                                   decodePct: done == 0 ? 0 : Double(decodedCount) / Double(done),
+                                   experimentID: experiment.id)
         return experiment
     }
 }
