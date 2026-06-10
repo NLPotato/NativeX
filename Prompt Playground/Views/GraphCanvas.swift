@@ -338,8 +338,8 @@ private struct NodeCardView: View {
     /// by a divider + darker fill) where {{var}} tokens are highlighted — so template variables read apart
     /// from the literal prompt prose (feedback #6).
     private func promptBand(_ text: String) -> some View {
-        highlightedPrompt(text)
-            .font(.dsMicro)
+        Text(highlightedPrompt(text))
+            .font(.dsMicro).foregroundStyle(.secondary)   // prose tone; {{var}} runs override with accent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, DS.Space.md).padding(.top, DS.Space.xs).padding(.bottom, DS.Space.sm)
             // Bottom corners match the card so the recess doesn't poke past the rounded edge.
@@ -349,26 +349,30 @@ private struct NodeCardView: View {
             .clipped()
     }
 
-    /// Template text as a single concatenated Text where {{var}} tokens are tinted + monospaced. Cheap;
-    /// scoped to the small (clipped) preview band.
-    private func highlightedPrompt(_ s: String) -> Text {
-        var result = Text("")
+    /// Template text as an AttributedString where {{var}} tokens are tinted + monospaced; prose runs carry
+    /// no color so they inherit the band's secondary tone. Cheap; scoped to the small (clipped) preview band.
+    private func highlightedPrompt(_ s: String) -> AttributedString {
+        var attr = AttributedString()
         var rest = Substring(s)
         let varFont = Font.system(size: 12, weight: .semibold, design: .monospaced)
+        func append(_ str: Substring, variable: Bool) {
+            guard !str.isEmpty else { return }
+            var run = AttributedString(String(str))
+            if variable { run.foregroundColor = Theme.accent; run.font = varFont }
+            attr.append(run)
+        }
         while let open = rest.range(of: "{{") {
-            let before = rest[rest.startIndex..<open.lowerBound]
-            if !before.isEmpty { result = result + Text(String(before)).foregroundStyle(.secondary) }
+            append(rest[rest.startIndex..<open.lowerBound], variable: false)
             if let close = rest.range(of: "}}", range: open.upperBound..<rest.endIndex) {
-                let token = rest[open.lowerBound..<close.upperBound]   // includes the {{ }}
-                result = result + Text(String(token)).font(varFont).foregroundStyle(Theme.accent)
+                append(rest[open.lowerBound..<close.upperBound], variable: true)   // includes the {{ }}
                 rest = rest[close.upperBound...]
             } else {
-                result = result + Text(String(rest[open.lowerBound...])).foregroundStyle(.secondary)
-                return result
+                append(rest[open.lowerBound...], variable: false)
+                return attr
             }
         }
-        if !rest.isEmpty { result = result + Text(String(rest)).foregroundStyle(.secondary) }
-        return result
+        append(rest, variable: false)
+        return attr
     }
 
     // Each port has a WIDE transparent grab zone (covering the dot + its variable chip), not just the 11pt
