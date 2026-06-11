@@ -43,6 +43,7 @@ struct ExecStep: Codable, Sendable, Identifiable {
     var promptTokens: Int? = nil        // heuristic estimate (native response.usage pending the 26.4 SDK — see TokenEstimator)
     var outputTokens: Int? = nil
     var contextTokens: Int? = nil
+    var transcript: TranscriptDef? = nil // the conversation-lane readback (session.transcript), entry by entry
 
     // Native-API / hook detail.
     var op: String? = nil
@@ -61,13 +62,14 @@ extension ExecStep {
     static func llm(id: UUID, title: String, ms: Int, ok: Bool, error: String?,
                     instructions: String, history: [TurnLine], currentTurn: String,
                     schemaName: String?, output: String?, configLabel: String?,
-                    promptTokens: Int, outputTokens: Int) -> ExecStep {
+                    promptTokens: Int, outputTokens: Int, transcript: TranscriptDef? = nil) -> ExecStep {
         var s = ExecStep(type: "llm", title: title)
         s.id = id; s.ms = ms; s.ok = ok; s.errorReason = error
         s.instructions = instructions; s.history = history; s.currentTurn = currentTurn
         s.schemaName = schemaName; s.output = output; s.configLabel = configLabel
         s.promptTokens = promptTokens; s.outputTokens = outputTokens
         s.contextTokens = promptTokens + outputTokens
+        s.transcript = transcript
         return s
     }
 

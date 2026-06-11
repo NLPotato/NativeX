@@ -220,6 +220,12 @@ private struct StepView: View {
             StageCardView(title: "Error", status: .error, text: "", ms: step.ms,
                           note: step.errorReason ?? "Generation failed", flat: true)
         }
+        // The conversation as the framework recorded it (session.transcript readback — the graph's
+        // conversation-lane protocol value), entry by entry with role labels.
+        if let def = step.transcript, !def.isEmpty {
+            StageCardView(title: "Transcript · \(def.entries.count) entries", status: .ok,
+                          text: def.text, note: "session.transcript readback", flat: true)
+        }
     }
 
     @ViewBuilder private var processBlocks: some View {

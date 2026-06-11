@@ -2,21 +2,29 @@
 //  GraphExecutor.swift
 //  Prompt Playground
 //
-//  Headless DAG executor for a GraphDef (v2). Topologically sorts the nodes, runs each once, and threads
-//  a [String:String] dataflow along the explicit edges: a node's inputs come from every incoming edge
-//  (ctx[inputPort] = outputs[fromNode][outputKey]).
+//  Headless DAG executor for a GraphDef (v2). Topologically sorts the nodes and runs each once.
+//  TWO lanes flow along the graph (docs/prd.md §5.2):
+//    • the VARIABLE lane — [String:String] per edge (ctx[inputPort] = outputs[fromNode][outputKey]):
+//      Input values, native-op/hook results, {{var}} substitution. The templating sidecar.
+//    • the CONVERSATION lane — a `TranscriptDef` (Codable mirror of FoundationModels.Transcript,
+//      see TranscriptDef.swift): a Prompt group emits the assembled REQUEST (instructions + history
+//      + the current turn as the trailing prompt entry, carrying schema + sampling); the FM seeds
+//      LanguageModelSession(transcript:) from its leading entries, responds with the trailing
+//      prompt, then reads `session.transcript` BACK and emits the full conversation — on the node
+//      run (`GraphNodeRun.transcript`), in `RunResult.transcripts`, and as a readable text
+//      projection on its `transcript` output port.
 //
 //  A **Prompt** is a group of member blocks (membership = `groupID`, the SINGLE source of truth — there
 //  is no edge-ancestry walk). The executor:
 //    • runs each block individually (instruction / history / current / few-shot) so per-node status,
 //      the wired-inputs map, and resolved-output previews keep working;
 //    • runs an Input node into its variable→value map (edges carry those to block {{vars}});
-//    • runs the `.promptGroup` container, which ASSEMBLES its members into a preview;
-//    • runs an FM node by finding its wired Prompt group, assembling instructions + history + current
-//      turn + guided schema + tools, and calling the model.
+//    • runs the `.promptGroup` container, which ASSEMBLES its members into the request TranscriptDef;
+//    • runs an FM node on its wired Prompt group's request (above).
 //  Implicit member→group ordering edges (added in topoSort) guarantee members run before the group, and
 //  the real group→FM edge orders the group before the FM. Each FM build is a FRESH
-//  LanguageModelSession(transcript:) — never reused (a persistent session would double-count history).
+//  LanguageModelSession(transcript:) — never reused (a persistent session would double-count history);
+//  seeding is append-only, which is what keeps the KV cache valid on shared paths (PRD §6.1).
 //
 //  Every model branch is a thin call into shipping logic: Vars.substitute · HookEngine.runOne ·
 //  DynamicRun.respond (guided) / LanguageModelSession.respond (free text).
@@ -62,6 +70,7 @@ enum GraphExecutor {
 
     struct RunResult {
         var outputs: [UUID: [String: String]] = [:]
+        var transcripts: [UUID: TranscriptDef] = [:]   // the conversation lane, per producing node
         var runs: [UUID: GraphNodeRun] = [:]
         var order: [UUID] = []
         var trace = ExecTrace()        // per-step records for the Run History page
@@ -104,7 +113,10 @@ enum GraphExecutor {
             onUpdate?(run)
             let start = Date()
             do {
-                run.outputs = try await execute(node, graph: graph, outputs: result.outputs, row: row)
+                let exec = try await execute(node, graph: graph, outputs: result.outputs,
+                                             transcripts: result.transcripts, row: row)
+                run.outputs = exec.outputs
+                run.transcript = exec.transcript
                 run.status = .ok
             } catch {
                 run.status = .error
@@ -112,6 +124,7 @@ enum GraphExecutor {
             }
             run.ms = Int(Date().timeIntervalSince(start) * 1000)
             result.outputs[id] = run.outputs
+            if let t = run.transcript { result.transcripts[id] = t }
             result.runs[id] = run
             onUpdate?(run)
             if let step = traceStep(for: node, run: run, graph: graph, outputs: result.outputs) {
@@ -125,53 +138,66 @@ enum GraphExecutor {
 
     // MARK: Per-node execution
 
+    /// One node's execution result: the variable-lane outputs (per-port strings) plus the
+    /// conversation-lane value when the node participates in it (Prompt group / FM).
+    private struct NodeExecution {
+        var outputs: [String: String]
+        var transcript: TranscriptDef? = nil
+    }
+
     private static func execute(_ node: GraphNode, graph: GraphDef,
                                 outputs: [UUID: [String: String]],
-                                row: [String: String]? = nil) async throws -> [String: String] {
+                                transcripts: [UUID: TranscriptDef],
+                                row: [String: String]? = nil) async throws -> NodeExecution {
         var ctx = inputContext(for: node, graph: graph, outputs: outputs)
 
         switch node.kind {
         case .input:
             let p = node.input ?? InputPayload()
             switch p.source {
-            case .staticLiteral: return p.statics
-            case .json:          return GraphJSON.scalarObject(p.jsonLiteral)
+            case .staticLiteral: return NodeExecution(outputs: p.statics)
+            case .json:          return NodeExecution(outputs: GraphJSON.scalarObject(p.jsonLiteral))
             case .dataset:
                 // Batch: GraphBatchRunner injects the current row; emit only this node's declared columns.
                 guard let row else { throw ExecError.datasetNeedsBatch(node: node.title.isEmpty ? node.kind.label : node.title) }
-                return row.filter { node.outputKeys.contains($0.key) }
+                return NodeExecution(outputs: row.filter { node.outputKeys.contains($0.key) })
             default:             throw ExecError.dynamicInputUnsupported(source: p.source.label)
             }
 
         case .instruction:
-            return ["text": Vars.substitute(node.instruction?.text ?? "", ctx)]
+            return NodeExecution(outputs: ["text": Vars.substitute(node.instruction?.text ?? "", ctx)])
 
         case .history:
-            return ["turn": Vars.substitute(node.history?.content ?? "", ctx)]
+            return NodeExecution(outputs: ["turn": Vars.substitute(node.history?.content ?? "", ctx)])
 
         case .current:
-            return ["currentturn": Vars.substitute(node.current?.template ?? "", ctx)]
+            return NodeExecution(outputs: ["currentturn": Vars.substitute(node.current?.template ?? "", ctx)])
 
         case .fewshot:
             let pairs = (node.fewshot?.shots ?? []).filter { !$0.user.isEmpty || !$0.assistant.isEmpty }
-            return ["fewshot": pairs.map { "User: \($0.user)\nAssistant: \($0.assistant)" }.joined(separator: "\n\n")]
+            return NodeExecution(outputs: ["fewshot": pairs.map { "User: \($0.user)\nAssistant: \($0.assistant)" }.joined(separator: "\n\n")])
 
         case .guided, .tool, .compare:
-            return [:]   // metadata / reference nodes — no dataflow output (Compare runs via GraphCompareRunner)
+            return NodeExecution(outputs: [:])   // metadata / reference nodes — no dataflow output (Compare runs via GraphCompareRunner)
 
         case .nativeAPI, .hook:
-            guard let hook = node.hook else { return [:] }
+            guard let hook = node.hook else { return NodeExecution(outputs: [:]) }
             let step = await HookEngine.runOne(hook, context: &ctx)
             if let err = step.error { throw HookFailure(message: err) }
             let key = hook.outputVar.isEmpty ? "output" : hook.outputVar
-            return [key: step.output ?? ""]
+            return NodeExecution(outputs: [key: step.output ?? ""])
 
         case .promptGroup:
             let a = assemble(groupID: node.id, graph: graph, outputs: outputs)
-            return ["instructions": a.instructionsText, "_currentturn": a.currentTurn, "_transcript": a.transcriptText]
+            // The group's conversation-lane output: the REQUEST as a Transcript. Its trailing prompt
+            // entry records the guided schema and the sampling label of the FM this group feeds.
+            let config = graph.fmID(fedBy: node.id).flatMap { graph.node($0)?.fm?.config }
+            return NodeExecution(
+                outputs: ["instructions": a.instructionsText, "_currentturn": a.currentTurn, "_transcript": a.transcriptText],
+                transcript: transcriptDef(from: a, config: config))
 
         case .fm:
-            return try await runFM(node, graph: graph, outputs: outputs)
+            return try await runFM(node, graph: graph, outputs: outputs, transcripts: transcripts)
         }
     }
 
@@ -251,43 +277,72 @@ enum GraphExecutor {
 
     // MARK: FM node
 
+    /// Run the model on the wired Prompt group's request `TranscriptDef`. The FM-boundary contract
+    /// (TranscriptDef.swift): leading entries seed a FRESH `LanguageModelSession(transcript:)`; the
+    /// trailing prompt entry's text is the live `respond(to:)` argument (the framework appends the
+    /// prompt + response entries to `session.transcript` itself — seeding the turn would double-send
+    /// it). Afterwards the session's transcript is read BACK and emitted as the node's conversation-
+    /// lane output, so downstream nodes (and the trace) see the real recorded conversation.
     private static func runFM(_ node: GraphNode, graph: GraphDef,
-                              outputs: [UUID: [String: String]]) async throws -> [String: String] {
+                              outputs: [UUID: [String: String]],
+                              transcripts: [UUID: TranscriptDef]) async throws -> NodeExecution {
         let payload = node.fm ?? FMPayload()
         guard let groupID = graph.promptGroupID(feeding: node.id) else {
             throw ExecError.missingPromptGroup(node: node.title)
         }
         let a = assemble(groupID: groupID, graph: graph, outputs: outputs)
-        guard !a.currentTurn.isEmpty else { throw ExecError.missingCurrentTurn(node: node.title) }
+        // The group runs before the FM (topo order), so its emitted request is in `transcripts`;
+        // re-assembling is the defensive fallback only.
+        let request = transcripts[groupID] ?? transcriptDef(from: a, config: payload.config)
+        guard let turn = request.trailingPrompt, !turn.text.isEmpty else {
+            throw ExecError.missingCurrentTurn(node: node.title)
+        }
 
-        let session = LanguageModelSession(transcript: buildTranscript(instructions: a.instructionsText, history: a.history))
+        let session = LanguageModelSession(transcript: request.seed.toTranscript())
         let options = payload.config.toOptions()
 
+        var out: [String: String]
         if let def = a.guided {
-            let content = try await DynamicRun.respond(session: session, prompt: a.currentTurn, def: def, options: options)
-            return ["output": prettyJSONString(content.jsonString), "json": content.jsonString,
-                    "_currentturn": a.currentTurn, "_transcript": a.transcriptText]
+            let content = try await DynamicRun.respond(session: session, prompt: turn.text, def: def, options: options)
+            out = ["output": prettyJSONString(content.jsonString), "json": content.jsonString]
         } else {
-            let response = try await session.respond(to: a.currentTurn, options: options)
-            return ["output": response.content, "_currentturn": a.currentTurn, "_transcript": a.transcriptText]
+            let response = try await session.respond(to: turn.text, options: options)
+            out = ["output": response.content]
         }
+
+        // Readback: the framework recorded the prompt entry (with its responseFormat on guided runs)
+        // and the response. Stamp the sampling label (+ schema name on the free-text fallback) onto
+        // the live prompt entry — GenerationOptions isn't introspectable from a readback.
+        var full = TranscriptDef(session.transcript)
+        if let i = full.entries.lastIndex(where: { $0.kind == .prompt }) {
+            full.entries[i].responseFormatName = full.entries[i].responseFormatName ?? a.guided?.typeName
+            full.entries[i].optionsLabel = payload.config.label
+        }
+        out["transcript"] = full.text
+        out["_currentturn"] = turn.text
+        out["_transcript"] = a.transcriptText
+        return NodeExecution(outputs: out, transcript: full)
     }
 
-    /// Seed Transcript: instructions → Instructions entry; history human/ai → prompt/response entries.
-    /// The current turn is NOT here — it is the live `respond(to:)` argument.
-    private static func buildTranscript(instructions: String, history: [(role: TurnRole, text: String)]) -> Transcript {
-        var entries: [Transcript.Entry] = []
-        if !instructions.isEmpty {
-            entries.append(.instructions(Transcript.Instructions(segments: [.text(.init(content: instructions))],
-                                                                 toolDefinitions: [])))
+    /// AssembledPrompt → the request `TranscriptDef` a Prompt group emits: instructions entry,
+    /// history prompt/response entries, then the current turn as the TRAILING prompt entry carrying
+    /// the guided schema name and the sampling label in force.
+    static func transcriptDef(from a: AssembledPrompt, config: GenConfig?) -> TranscriptDef {
+        var entries: [TranscriptDef.Entry] = []
+        if !a.instructionsText.isEmpty {
+            entries.append(.init(kind: .instructions, segments: [.init(text: a.instructionsText)]))
         }
-        for turn in history where !turn.text.isEmpty {
-            switch turn.role {
-            case .human: entries.append(.prompt(Transcript.Prompt(segments: [.text(.init(content: turn.text))])))
-            case .ai:    entries.append(.response(Transcript.Response(assetIDs: [], segments: [.text(.init(content: turn.text))])))
-            }
+        for turn in a.history where !turn.text.isEmpty {
+            entries.append(.init(kind: turn.role == .human ? .prompt : .response,
+                                 segments: [.init(text: turn.text)]))
         }
-        return Transcript(entries: entries)
+        if !a.currentTurn.isEmpty {
+            var e = TranscriptDef.Entry(kind: .prompt, segments: [.init(text: a.currentTurn)])
+            e.responseFormatName = a.guided?.typeName
+            e.optionsLabel = config?.label
+            entries.append(e)
+        }
+        return TranscriptDef(entries: entries)
     }
 
     // MARK: Run-history trace (per-step records)
@@ -304,16 +359,28 @@ enum GraphExecutor {
             let a = graph.promptGroupID(feeding: node.id)
                 .map { assemble(groupID: $0, graph: graph, outputs: outputs) } ?? AssembledPrompt()
             let output = run.outputs["output"] ?? ""
-            let promptTok = TokenEstimator.estimate(a.instructionsText)
-                + a.history.reduce(0) { $0 + TokenEstimator.estimate($1.text) }
-                + TokenEstimator.estimate(a.currentTurn)
+            // Token figures from the conversation-lane readback when the run produced one (prompt
+            // side = every entry before the generated response); string re-assembly on error runs.
+            // Heuristic estimates either way — see TokenEstimator for the 26.4 native-API plan.
+            let promptTok: Int
+            let outputTok: Int
+            if let def = run.transcript, let last = def.entries.last, last.kind == .response {
+                promptTok = TranscriptDef(entries: Array(def.entries.dropLast())).estimatedTokens
+                outputTok = TokenEstimator.estimate(last.text)
+            } else {
+                promptTok = TokenEstimator.estimate(a.instructionsText)
+                    + a.history.reduce(0) { $0 + TokenEstimator.estimate($1.text) }
+                    + TokenEstimator.estimate(a.currentTurn)
+                outputTok = TokenEstimator.estimate(output)
+            }
             return .llm(id: run.id, title: node.title.isEmpty ? NodeKind.fm.label : node.title,
                         ms: run.ms ?? 0, ok: run.status == .ok, error: run.error,
                         instructions: a.instructionsText,
                         history: a.history.map { TurnLine(role: $0.role.label, text: $0.text) },
                         currentTurn: a.currentTurn, schemaName: a.guided?.typeName,
                         output: run.status == .ok ? output : nil, configLabel: node.fm?.config.label,
-                        promptTokens: promptTok, outputTokens: TokenEstimator.estimate(output))
+                        promptTokens: promptTok, outputTokens: outputTok,
+                        transcript: run.transcript)
 
         case .nativeAPI, .hook:
             guard let hook = node.hook else { return nil }

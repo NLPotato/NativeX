@@ -303,7 +303,7 @@ extension GraphNode {
         case .promptGroup:      return ["prompt"]            // the assembled request → FM
         case .input:            return inputVarNames          // one port per produced variable
         case .nativeAPI, .hook: return [hook.map { $0.outputVar.isEmpty ? "output" : $0.outputVar } ?? "output"]
-        case .fm:               return ["output", "json"]
+        case .fm:               return ["output", "json", "transcript"]   // transcript = the full post-run conversation (TranscriptDef.text)
         default:                return []                     // blocks: consumed by membership
         }
     }
@@ -410,6 +410,10 @@ struct GraphNodeRun: Identifiable, Sendable {
     let nodeID: UUID
     var status: Status = .pending
     var outputs: [String: String] = [:]
+    /// The conversation-lane protocol value this node produced (TranscriptDef.swift): a Prompt
+    /// group emits the assembled request; an FM emits the full post-run conversation (the
+    /// session.transcript readback). nil for nodes outside the conversation lane.
+    var transcript: TranscriptDef? = nil
     var ms: Int? = nil
     var error: String? = nil
     var note: String? = nil

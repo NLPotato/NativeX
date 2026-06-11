@@ -628,6 +628,19 @@ private struct FMEditor: View {
             if let ms = run.ms {
                 Text("\(ms) ms").font(.dsCaption).foregroundStyle(.tertiary).monospacedDigit()
             }
+            // The conversation as the framework recorded it (session.transcript readback) — the
+            // node's `transcript` output port carries its text projection downstream.
+            if let def = run.transcript, !def.isEmpty {
+                DisclosureGroup {
+                    TranscriptEntryList(def: def).padding(.top, DS.Space.sm)
+                } label: {
+                    HStack(spacing: DS.Space.sm) {
+                        Text("Conversation").font(.dsLabel)
+                        Text("session.transcript · \(def.entries.count) entries")
+                            .font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    }
+                }
+            }
         } else {
             VStack(spacing: DS.Space.sm) {
                 Image(systemName: "brain").font(.dsDisplay).foregroundStyle(.tertiary)
@@ -642,7 +655,8 @@ private struct FMEditor: View {
 // MARK: - Shared blocks
 
 /// The full composed prompt for a group: the TEMPLATE (raw {{vars}}, in top→bottom order) shown always,
-/// plus the RESOLVED transcript/current turn after a run. Answers "show the full prompt template, in order".
+/// plus the RESOLVED request after a run — entry by entry, as the Transcript protocol value the group
+/// emitted (TranscriptDef). Answers "show the full prompt template, in order".
 private struct PromptCompositionView: View {
     let engine: GraphEngine
     let groupID: UUID
@@ -660,16 +674,60 @@ private struct PromptCompositionView: View {
             }
             .dsGroup()
 
-            let resolvedT = run?.outputs["_transcript"] ?? ""
-            let resolvedC = run?.outputs["_currentturn"] ?? ""
-            if !resolvedT.isEmpty || !resolvedC.isEmpty {
+            if let def = run?.transcript, !def.isEmpty {
                 VStack(alignment: .leading, spacing: DS.Space.sm) {
-                    DSSectionHeader("Resolved — last run")
-                    if !resolvedT.isEmpty { OutputBlock(title: "Transcript", text: resolvedT) }
-                    OutputBlock(title: "Current turn", text: resolvedC)
+                    DSSectionHeader("Resolved request — last run · Transcript")
+                    TranscriptEntryList(def: def)
                 }
                 .dsGroup()
+            } else {
+                let resolvedT = run?.outputs["_transcript"] ?? ""
+                let resolvedC = run?.outputs["_currentturn"] ?? ""
+                if !resolvedT.isEmpty || !resolvedC.isEmpty {
+                    VStack(alignment: .leading, spacing: DS.Space.sm) {
+                        DSSectionHeader("Resolved — last run")
+                        if !resolvedT.isEmpty { OutputBlock(title: "Transcript", text: resolvedT) }
+                        OutputBlock(title: "Current turn", text: resolvedC)
+                    }
+                    .dsGroup()
+                }
             }
+        }
+    }
+}
+
+/// The conversation lane, entry by entry: role + the official `Transcript.*` symbol per entry
+/// (UX-First §4.2), with the guided schema + sampling chips on prompt entries. Shared by the
+/// Prompt-group inspector (the emitted request) and the FM inspector (the session readback).
+struct TranscriptEntryList: View {
+    let def: TranscriptDef
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            ForEach(def.entries) { entry in
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    HStack(spacing: DS.Space.sm) {
+                        Text(entry.roleLabel).dsBadge(entry.kind == .response ? .dsAccent : .secondary)
+                        Text(entry.apiName).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        if let schema = entry.responseFormatName {
+                            Text(schema).dsBadge(.dsInfo)
+                        }
+                    }
+                    if let options = entry.optionsLabel, !options.isEmpty {
+                        Text(options).font(.dsMicro).foregroundStyle(.tertiary)
+                    }
+                    Text(entry.text.isEmpty ? "—" : entry.text)
+                        .font(.dsCode).foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .lineLimit(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DS.Space.sm)
+                        .codeSurface()
+                }
+            }
+            Text("~\(def.estimatedTokens) estimated tokens · \(def.entries.count) entries")
+                .font(.dsMicro).foregroundStyle(.tertiary).monospacedDigit()
         }
     }
 }
