@@ -103,8 +103,22 @@ struct StageCardView: View {
     var ms: Int? = nil
     var note: String? = nil
     var raised: Bool = false
+    var flat: Bool = false   // nested inside a container card (Run History steps): quiet group, no frost
 
     var body: some View {
+        if flat {
+            core.dsGroup()
+                // The "this is the output" cue without an accent wash: a slim accent edge.
+                .overlay(alignment: .leading) {
+                    if raised { Rectangle().fill(Theme.accent.opacity(0.45)).frame(width: 3) }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+        } else {
+            core.dsCard(raised: raised)
+        }
+    }
+
+    private var core: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.sm) {
                 statusGlyph
@@ -126,7 +140,6 @@ struct StageCardView: View {
                     .codeSurface()
             }
         }
-        .dsCard(raised: raised)
     }
 
     @ViewBuilder private var statusGlyph: some View {

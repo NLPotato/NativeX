@@ -123,22 +123,25 @@ private struct PromptGroupEditor: View {
             Text("A Prompt assembles its member blocks into one request. Blocks concatenate top→bottom — drag a block up or down to reorder it. Wire the frame’s output into a Foundation Model.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
-            DSSectionHeader("Blocks — in order")
-            let members = engine.members(of: node.id).sorted { $0.y < $1.y }   // assembly order = top→bottom
-            if members.isEmpty {
-                Text("No blocks yet. Add an Instruction / Current turn / Guided block and drag it into this frame.")
-                    .font(.dsCaption).foregroundStyle(.tertiary)
-            } else {
-                ForEach(Array(members.enumerated()), id: \.element.id) { idx, m in
-                    HStack(spacing: DS.Space.sm) {
-                        Text("\(idx + 1)").font(.dsMicro.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 14, alignment: .trailing)
-                        Image(systemName: m.kind.symbol).font(.dsCaption).foregroundStyle(.secondary).frame(width: 18)
-                        Text(m.kind.label).font(.dsCaption)
-                        Spacer(minLength: 0)
-                        Text(m.title).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(1)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Blocks — in order")
+                let members = engine.members(of: node.id).sorted { $0.y < $1.y }   // assembly order = top→bottom
+                if members.isEmpty {
+                    Text("No blocks yet. Add an Instruction / Current turn / Guided block and drag it into this frame.")
+                        .font(.dsCaption).foregroundStyle(.tertiary)
+                } else {
+                    ForEach(Array(members.enumerated()), id: \.element.id) { idx, m in
+                        HStack(spacing: DS.Space.sm) {
+                            Text("\(idx + 1)").font(.dsMicro.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 14, alignment: .trailing)
+                            Image(systemName: m.kind.symbol).font(.dsCaption).foregroundStyle(.secondary).frame(width: 18)
+                            Text(m.kind.label).font(.dsCaption)
+                            Spacer(minLength: 0)
+                            Text(m.title).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(1)
+                        }
                     }
                 }
             }
+            .dsGroup()
 
             PromptCompositionView(engine: engine, groupID: node.id, run: run)
         }
@@ -297,10 +300,13 @@ private struct InputEditor: View {
                         .font(.dsCaption).foregroundStyle(.dsWarning).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            DSSectionHeader("Produces")
-            let vars = node.inputVarNames
-            Text(vars.isEmpty ? "No variables yet." : vars.joined(separator: ", "))
-                .font(.dsCode).foregroundStyle(vars.isEmpty ? .tertiary : .secondary)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Produces")
+                let vars = node.inputVarNames
+                Text(vars.isEmpty ? "No variables yet." : vars.joined(separator: ", "))
+                    .font(.dsCode).foregroundStyle(vars.isEmpty ? .tertiary : .secondary)
+            }
+            .dsGroup()
             ResolvedOutputSection(text: run?.outputs[node.inputVarNames.first ?? ""], status: run?.status, error: run?.error)
         }
     }
@@ -638,18 +644,24 @@ private struct PromptCompositionView: View {
     var body: some View {
         let tmpl = GraphExecutor.assembleTemplate(groupID: groupID, graph: engine.graph)
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            DSSectionHeader("Prompt template — in order")
-            if !tmpl.transcriptText.isEmpty {
-                OutputBlock(title: "Instructions + history", text: tmpl.transcriptText)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Prompt template — in order")
+                if !tmpl.transcriptText.isEmpty {
+                    OutputBlock(title: "Instructions + history", text: tmpl.transcriptText)
+                }
+                OutputBlock(title: "Current turn", text: tmpl.currentTurn.isEmpty ? "(no current-turn block)" : tmpl.currentTurn)
             }
-            OutputBlock(title: "Current turn", text: tmpl.currentTurn.isEmpty ? "(no current-turn block)" : tmpl.currentTurn)
+            .dsGroup()
 
             let resolvedT = run?.outputs["_transcript"] ?? ""
             let resolvedC = run?.outputs["_currentturn"] ?? ""
             if !resolvedT.isEmpty || !resolvedC.isEmpty {
-                DSSectionHeader("Resolved — last run")
-                if !resolvedT.isEmpty { OutputBlock(title: "Transcript", text: resolvedT) }
-                OutputBlock(title: "Current turn", text: resolvedC)
+                VStack(alignment: .leading, spacing: DS.Space.sm) {
+                    DSSectionHeader("Resolved — last run")
+                    if !resolvedT.isEmpty { OutputBlock(title: "Transcript", text: resolvedT) }
+                    OutputBlock(title: "Current turn", text: resolvedC)
+                }
+                .dsGroup()
             }
         }
     }
@@ -666,10 +678,11 @@ private struct PortWiringSection: View {
     var body: some View {
         let ports = engine.graph.node(nodeID)?.inputPorts ?? []
         if !ports.isEmpty {
-            DSSectionHeader("Inputs — wire each {{var}}")
             VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Inputs — wire each {{var}}")
                 ForEach(ports, id: \.self) { PortWiringRow(engine: engine, nodeID: nodeID, port: $0) }
             }
+            .dsGroup()
         }
     }
 }
@@ -735,12 +748,18 @@ private struct ResolvedOutputSection: View {
 
     var body: some View {
         if status == .error, let error {
-            DSSectionHeader("Output")
-            Label(error, systemImage: "xmark.octagon.fill")
-                .font(.dsCaption).foregroundStyle(.dsDanger).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Output")
+                Label(error, systemImage: "xmark.octagon.fill")
+                    .font(.dsCaption).foregroundStyle(.dsDanger).fixedSize(horizontal: false, vertical: true)
+            }
+            .dsGroup()
         } else if let text, !text.isEmpty {
-            DSSectionHeader("Resolved output")
-            OutputBlock(title: "Output", text: text)
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DSSectionHeader("Resolved output")
+                OutputBlock(title: "Output", text: text)
+            }
+            .dsGroup()
         }
     }
 }

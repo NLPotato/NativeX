@@ -118,6 +118,16 @@ extension View {
         }
     }
 
+    /// Quiet grouping container — clusters related rows/blocks into ONE visual unit (inspector
+    /// sections, Run History steps). Flat fill + hairline, no frost — nests safely inside cards
+    /// and panes (§3.5). This is the "structured block" between bare stacking and a full dsCard.
+    func dsGroup() -> some View {
+        padding(DS.Space.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: DS.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(.dsHairline))
+    }
+
     /// Flat nested surface (no frost-on-frost) + accent depth rule. See design.md §3.5.
     func dsFlat() -> some View {
         padding(DS.Space.md)

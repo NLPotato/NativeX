@@ -18,6 +18,13 @@ struct RunHistoryView: View {
 
     private var selected: TraceModel? { traces.first { $0.id == selectedID } }
 
+    /// Newest-first day buckets — the list reads as a journal instead of one undifferentiated stream.
+    private var byDay: [(day: Date, traces: [TraceModel])] {
+        Dictionary(grouping: traces) { Calendar.current.startOfDay(for: $0.createdAt) }
+            .sorted { $0.key > $1.key }
+            .map { (day: $0.key, traces: $0.value) }
+    }
+
     var body: some View {
         HSplitView {
             master
@@ -47,11 +54,17 @@ struct RunHistoryView: View {
             if traces.isEmpty {
                 emptyList
             } else {
-                List(traces, selection: $selectedID) { trace in
-                    TraceRow(trace: trace).tag(trace.id)
-                        .contextMenu {
-                            Button(role: .destructive) { delete(trace) } label: { Label("Delete", systemImage: "trash") }
+                List(selection: $selectedID) {
+                    ForEach(byDay, id: \.day) { group in
+                        Section(group.day.formatted(date: .abbreviated, time: .omitted)) {
+                            ForEach(group.traces) { trace in
+                                TraceRow(trace: trace).tag(trace.id)
+                                    .contextMenu {
+                                        Button(role: .destructive) { delete(trace) } label: { Label("Delete", systemImage: "trash") }
+                                    }
+                            }
                         }
+                    }
                 }
                 .listStyle(.sidebar)
             }
@@ -123,8 +136,6 @@ private struct TraceRow: View {
                 Label("\(trace.llmRunCount)", systemImage: "brain")
                 Text("·")
                 Text("\(trace.totalMs) ms").monospacedDigit()
-                Spacer()
-                Text(trace.createdAt, format: .dateTime.month().day())
             }
             .font(.dsMicro).foregroundStyle(.tertiary)
         }
@@ -172,6 +183,7 @@ private struct StepView: View {
     let index: Int
 
     var body: some View {
+        // One step = ONE visual block: header row + its stage groups inside a single card.
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.sm) {
                 Text("\(index + 1)").font(.dsMicro.monospacedDigit())
@@ -182,45 +194,44 @@ private struct StepView: View {
                 Text(step.id.uuidString.prefix(8)).font(.dsMicro).foregroundStyle(.tertiary)
             }
 
-            Group {
-                if step.type == "llm" { llmBlocks } else { processBlocks }
-            }
-            .padding(.leading, DS.Space.md)
+            if step.type == "llm" { llmBlocks } else { processBlocks }
         }
-        .padding(.vertical, DS.Space.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard(radius: DS.Radius.lg)
     }
 
     // The final prompt, in blocks → model output (or the failure + its reason).
     @ViewBuilder private var llmBlocks: some View {
         if let instr = step.instructions, !instr.isEmpty {
-            StageCardView(title: "Instructions", status: .ok, text: instr)
+            StageCardView(title: "Instructions", status: .ok, text: instr, flat: true)
         }
         if let turns = step.history, !turns.isEmpty {
             StageCardView(title: "History", status: .ok,
-                          text: turns.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n"))
+                          text: turns.map { "\($0.role.uppercased()): \($0.text)" }.joined(separator: "\n\n"),
+                          flat: true)
         }
         if let cur = step.currentTurn, !cur.isEmpty {
-            StageCardView(title: "Current turn", status: .ok, text: cur)
+            StageCardView(title: "Current turn", status: .ok, text: cur, flat: true)
         }
         if step.ok {
             StageCardView(title: "Output", status: .ok, text: step.output ?? "",
-                          ms: step.ms, note: tokenNote, raised: true)
+                          ms: step.ms, note: tokenNote, raised: true, flat: true)
         } else {
             StageCardView(title: "Error", status: .error, text: "", ms: step.ms,
-                          note: step.errorReason ?? "Generation failed")
+                          note: step.errorReason ?? "Generation failed", flat: true)
         }
     }
 
     @ViewBuilder private var processBlocks: some View {
         if let input = step.input, !input.isEmpty {
-            StageCardView(title: "Input", status: .ok, text: input)
+            StageCardView(title: "Input", status: .ok, text: input, flat: true)
         }
         if step.ok {
             StageCardView(title: "Output", status: .ok, text: step.stepOutput ?? "",
-                          ms: step.ms, note: step.op, raised: true)
+                          ms: step.ms, note: step.op, raised: true, flat: true)
         } else {
             StageCardView(title: "Error", status: .error, text: "", ms: step.ms,
-                          note: step.errorReason ?? "Step failed")
+                          note: step.errorReason ?? "Step failed", flat: true)
         }
     }
 
