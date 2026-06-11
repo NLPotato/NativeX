@@ -116,22 +116,36 @@ struct GraphCanvas: View {
             .coordinateSpace(name: graphBoardSpace)
             .onDeleteCommand { engine.deleteSelectionOrEdge() }
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
-            // The primary action — a prominent accent Run pill in the bottom-left corner (⌘↩), pulled out
-            // of the top toolbar so the most important command lives on the canvas and stands out.
-            .overlay(alignment: .bottomLeading) {
-                CanvasRunControl(engine: engine, onRun: onRun, batch: batch,
-                                 boundDataset: boundDataset, onRunDataset: onRunDataset).padding(DS.Space.lg)
-            }
-            // Figma/Photoshop-style floating bar — actions for the current selection, pinned bottom-center.
-            .overlay(alignment: .bottom) { CanvasContextBar(engine: engine).padding(.bottom, DS.Space.lg) }
-            // Zoom control in the corner (Figma/Adobe convention) — keeps the top toolbar uncluttered.
-            .overlay(alignment: .bottomTrailing) { CanvasZoomControl(engine: engine).padding(DS.Space.lg) }
-            // Live run feedback: the executing node (top-center pill) + run errors (top-right toast).
-            .overlay(alignment: .top) { CanvasRunningPill(engine: engine).padding(.top, DS.Space.lg) }
-            .overlay(alignment: .topTrailing) { CanvasErrorToast(engine: engine).padding(DS.Space.lg) }
-            // Batch completion summary (top-left), deep-linking to the Lab sweep.
-            .overlay(alignment: .topLeading) {
-                if let batch { CanvasBatchSummaryCard(batch: batch, onOpenLab: onOpenLab).padding(DS.Space.lg) }
+            // ALL floating chrome lives in ONE overlay inside a GlassEffectContainer, so co-located glass
+            // surfaces merge into a single optical piece instead of stacking (design.md §3.5 glass-on-glass
+            // rule). Empty space in the ZStack stays transparent → canvas gestures pass through.
+            .overlay {
+                GlassEffectContainer {
+                    ZStack {
+                        // The primary action — a prominent accent Run pill, bottom-left (⌘↩), pulled out of
+                        // the top toolbar so the most important command lives on the canvas and stands out.
+                        CanvasRunControl(engine: engine, onRun: onRun, batch: batch,
+                                         boundDataset: boundDataset, onRunDataset: onRunDataset)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        // Figma/Photoshop-style floating bar — actions for the selection, bottom-center.
+                        CanvasContextBar(engine: engine)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        // Zoom control in the corner (Figma/Adobe convention) — keeps the toolbar uncluttered.
+                        CanvasZoomControl(engine: engine)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        // Live run feedback: the executing node (top-center pill) + run errors (top-right toast).
+                        CanvasRunningPill(engine: engine)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        CanvasErrorToast(engine: engine)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        // Batch completion summary (top-left), deep-linking to the Lab sweep.
+                        if let batch {
+                            CanvasBatchSummaryCard(batch: batch, onOpenLab: onOpenLab)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+                    }
+                    .padding(DS.Space.lg)
+                }
             }
             // Compare config sheet — opened by double-clicking a .compare node (clear guidance + lanes + Run).
             .sheet(item: Binding(
@@ -844,9 +858,7 @@ private struct CanvasContextBar: View {
             }
         }
         .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
-        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+        .glassEffect(.regular, in: Capsule())
         .tint(.primary)
     }
 
@@ -941,8 +953,7 @@ private struct CanvasRunControl: View {
                     .buttonStyle(.plain).foregroundStyle(.red).help("Stop the batch run")
             }
             .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+            .glassEffect(.regular, in: Capsule())
         } else {
             Button { onRunDataset() } label: {
                 HStack(spacing: DS.Space.xs) {
@@ -950,8 +961,7 @@ private struct CanvasRunControl: View {
                     Text("Run dataset").font(.dsCaption.weight(.medium))
                 }
                 .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+                .glassEffect(.regular, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(disabled || boundDataset == nil)
@@ -993,9 +1003,8 @@ private struct CanvasBatchSummaryCard: View {
                     .buttonStyle(.borderless).tint(Theme.accent)
                 }
                 .padding(DS.Space.md).frame(width: 340, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.md))
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Theme.accent.opacity(0.35)))
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: DS.Radius.lg))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Theme.accent.opacity(0.35)))
                 .transition(.scale(scale: 0.95).combined(with: .opacity))
             }
         }
@@ -1031,9 +1040,7 @@ private struct CanvasRunningPill: View {
                         .font(.dsCaption.weight(.medium)).lineLimit(1)
                 }
                 .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45)))
-                .shadow(color: Theme.accent.opacity(0.3), radius: 10, y: 3)
+                .glassEffect(.dsActive, in: Capsule())   // accent tint = "active" (§4.5)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -1057,9 +1064,8 @@ private struct CanvasErrorToast: View {
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.md))
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Color.dsDanger.opacity(0.45)))
-                .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: DS.Radius.lg))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Color.dsDanger.opacity(0.45)))
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .task(id: err) {
                     try? await Task.sleep(for: .seconds(6))
@@ -1095,9 +1101,7 @@ private struct CanvasZoomControl: View {
                 .keyboardShortcut("0", modifiers: .command)
         }
         .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xs)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
-        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+        .glassEffect(.regular, in: Capsule())
         .tint(.primary)
     }
 

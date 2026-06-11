@@ -59,6 +59,13 @@ extension ShapeStyle where Self == Color {
     static var dsHairline: Color { .white.opacity(0.10) }
 }
 
+// MARK: - Liquid Glass (floating chrome — see design.md §3.5/§4.5)
+
+extension Glass {
+    /// Accent-tinted glass for "active" floating chrome (the executing-node pill). §4.5.
+    static var dsActive: Glass { .regular.tint(Theme.accent.opacity(0.15)) }
+}
+
 // MARK: - Component chrome
 
 extension View {

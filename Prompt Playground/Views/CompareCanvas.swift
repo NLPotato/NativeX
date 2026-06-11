@@ -48,21 +48,26 @@ struct CompareConfigSheet: View {
             }
 
             Text("Lanes").font(.dsLabel).foregroundStyle(.secondary)
-            if groups.isEmpty {
-                Text("No Prompt groups in this graph yet — add a couple, each feeding its own Foundation Model.")
-                    .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(groups) { g in
-                    let runnable = feedsFM(g.id)
-                    Toggle(isOn: laneBinding(g.id)) {
-                        HStack(spacing: DS.Space.xs) {
-                            Text(g.title.isEmpty ? "Prompt" : g.title).font(.dsBody)
-                            if !runnable { Text("· no model wired").font(.dsMicro).foregroundStyle(.dsWarning) }
+            // Inner content block on an opaque card — the sheet container itself is system glass (§4.5).
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                if groups.isEmpty {
+                    Text("No Prompt groups in this graph yet — add a couple, each feeding its own Foundation Model.")
+                        .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(groups) { g in
+                        let runnable = feedsFM(g.id)
+                        Toggle(isOn: laneBinding(g.id)) {
+                            HStack(spacing: DS.Space.xs) {
+                                Text(g.title.isEmpty ? "Prompt" : g.title).font(.dsBody)
+                                if !runnable { Text("· no model wired").font(.dsMicro).foregroundStyle(.dsWarning) }
+                            }
                         }
+                        .toggleStyle(.checkbox).disabled(!runnable)
                     }
-                    .toggleStyle(.checkbox).disabled(!runnable)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .dsCard()
 
             if let err = runner.error {
                 Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -162,10 +167,9 @@ struct CompareResultCluster: View {
                 .frame(maxWidth: 480)
             }
         }
-        .padding(DS.Space.md)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.lg))
+        // Content-heavy floating result → opaque card, not glass (design.md §3.5).
+        .dsCard(radius: DS.Radius.lg)
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Theme.accent.opacity(0.3)))
-        .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
         .sheet(isPresented: $showExpanded) { CompareResultView(outcome: outcome) }
     }
 

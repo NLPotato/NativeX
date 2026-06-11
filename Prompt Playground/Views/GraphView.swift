@@ -14,27 +14,26 @@ import SwiftData
 struct GraphView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.undoManager) private var undoManager
-    let engine: GraphEngine   // owned by the App so the working graph survives navigation
+    @Bindable var engine: GraphEngine   // owned by the App so the working graph survives navigation
     var onOpenLab: () -> Void = {}   // deep-link from the batch summary card → switch to the Lab tab
     @Query(sort: \GraphModel.createdAt) private var saved: [GraphModel]
     @Query(sort: \DatasetModel.createdAt) private var datasets: [DatasetModel]
     @State private var batch = GraphBatchRunner()
 
     var body: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                toolbar
-                Divider()
-                GraphCanvas(engine: engine, onRun: persistRun, batch: datasetInput != nil ? batch : nil,
-                            boundDataset: boundDataset, onRunDataset: runOverDataset, onOpenLab: onOpenLab)
-                    .runningRadiance(active: engine.isRunning)
-            }
-            .frame(minWidth: 480)
-
-            if engine.showInspector {
-                inspectorPane
-                    .frame(minWidth: DS.Size.panelMinWidth, idealWidth: DS.Size.panelIdealWidth, maxWidth: 540)
-            }
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            GraphCanvas(engine: engine, onRun: persistRun, batch: datasetInput != nil ? batch : nil,
+                        boundDataset: boundDataset, onRunDataset: runOverDataset, onOpenLab: onOpenLab)
+                .runningRadiance(active: engine.isRunning)
+        }
+        .frame(minWidth: 480)
+        // System inspector — its panel chrome is system-managed Liquid Glass; never re-apply
+        // .glassEffect to it (design.md §4.5).
+        .inspector(isPresented: $engine.showInspector) {
+            inspectorPane
+                .inspectorColumnWidth(min: DS.Size.panelMinWidth, ideal: DS.Size.panelIdealWidth, max: 540)
         }
         // The window's UndoManager drives ⌘Z/⌘⇧Z via the standard Edit menu; hand it to the engine so
         // structural edits register snapshots against it (and text-field undo still wins while editing).
