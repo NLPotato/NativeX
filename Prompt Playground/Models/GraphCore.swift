@@ -95,8 +95,8 @@ enum NodeKind: String, Codable, CaseIterable, Sendable, Identifiable {
 // MARK: - Payloads (struct-of-optionals on GraphNode; exactly one is non-nil per kind)
 
 struct PromptGroupPayload: Codable, Equatable, Sendable {
-    var width: Double = 320       // empty-state fallback frame size (when the group has no members)
-    var height: Double = 160
+    var width: Double = 248       // empty-state fallback frame size (when the group has no members):
+    var height: Double = 160      // default block width (216) + 16pt stack padding each side
 }
 
 struct InstructionPayload: Codable, Equatable, Sendable {

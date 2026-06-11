@@ -23,7 +23,7 @@ enum NodeMetrics {
     static let portSlot: CGFloat = 26
     static let footer: CGFloat = 14
     static let portDot: CGFloat = 11
-    static let previewSlot: CGFloat = 70 // body band that shows a text block's content on the card
+    static let previewSlot: CGFloat = 84 // body band that shows a text block's content on the card
 
     /// Card width: the manual override (drag the resize grip), clamped to a legible floor, else the default.
     static func width(_ n: GraphNode) -> CGFloat {
@@ -278,13 +278,13 @@ final class GraphEngine {
             n.groupID = group
             let ms = members(of: group)
             if let lowest = ms.map({ $0.y + NodeMetrics.height($0) }).max(), let x = ms.map(\.x).min() {
-                n.x = x; n.y = lowest + 20
+                n.x = x; n.y = lowest + GraphEngine.blockGap   // appended at the END of the assembly order
             } else if let g = graph.node(group) {
-                n.x = g.x + 60; n.y = g.y + GraphEngine.groupHeader + 20
+                n.x = g.x + GraphEngine.groupPad; n.y = g.y + GraphEngine.groupHeader + GraphEngine.groupPad
             }
             graph.nodes.append(n)
             selection = n.id; selectedSet = []
-            fitGroupFrame(group)   // grow the frame so the new block sits inside it
+            autoLayoutGroup(group)   // snap the stack tidy (and the frame tight) around the new member
         } else {
             n.x = p.x; n.y = p.y
             graph.nodes.append(n)
@@ -608,7 +608,8 @@ final class GraphEngine {
 
     // MARK: Prompt groups (an explicit, resizable frame container; membership = block center inside it)
 
-    static let groupPad: CGFloat = 30        // breathing room kept around members when the frame grows to fit them
+    static let groupPad: CGFloat = 16        // breathing room kept around members (tight — a group hugs its stack)
+    static let blockGap: CGFloat = 12        // vertical gap between stacked member blocks (auto-layout)
     static let groupHeader: CGFloat = 30     // canvas-space header band reserved ABOVE the members
     static let groupStickyMargin: CGFloat = 24  // hysteresis: a member stays until its center leaves the frame by this much
     static let groupMinWidth: CGFloat = 240
@@ -670,6 +671,41 @@ final class GraphEngine {
         graph.nodes[i].group?.height = Double(max(GraphEngine.groupMinHeight, size.height))
     }
 
+    /// Auto-layout: re-stack a group's members into one tidy left-aligned column and shrink-wrap the frame
+    /// around the stack. The column order is the members' CURRENT top→bottom order — which IS the assembly
+    /// order (GraphExecutor sorts by y) — so dragging a block above/below a sibling and dropping it
+    /// re-orders the prompt and the stack snaps tidy (drag-to-order).
+    func autoLayoutGroup(_ groupID: UUID) {
+        guard let gi = index(groupID), graph.nodes[gi].kind == .promptGroup else { return }
+        let ordered = members(of: groupID).sorted { $0.y < $1.y }
+        guard !ordered.isEmpty else { return }
+        let pad = GraphEngine.groupPad
+        let origin = CGPoint(x: graph.nodes[gi].x, y: graph.nodes[gi].y)
+        let width = ordered.map(NodeMetrics.width).max() ?? NodeMetrics.defaultWidth
+        var y = origin.y + GraphEngine.groupHeader + pad
+        for m in ordered {
+            guard let i = index(m.id) else { continue }
+            graph.nodes[i].x = origin.x + pad
+            graph.nodes[i].y = y
+            y += NodeMetrics.height(graph.nodes[i]) + GraphEngine.blockGap
+        }
+        graph.nodes[gi].group?.width  = Double(max(GraphEngine.groupMinWidth, width + pad * 2))
+        graph.nodes[gi].group?.height = Double(max(GraphEngine.groupMinHeight, (y - GraphEngine.blockGap + pad) - origin.y))
+    }
+
+    /// Move a member one step up/down in the assembly order (swap y with its neighbor, then re-stack).
+    /// Drives the inspector's reorder arrows; the canvas equivalent is dragging the block itself.
+    func moveMember(_ id: UUID, up: Bool) {
+        guard let n = graph.node(id), let g = n.groupID else { return }
+        let ordered = members(of: g).sorted { $0.y < $1.y }
+        guard let idx = ordered.firstIndex(where: { $0.id == id }),
+              ordered.indices.contains(up ? idx - 1 : idx + 1) else { return }
+        snapshot()
+        guard let a = index(ordered[idx].id), let b = index(ordered[up ? idx - 1 : idx + 1].id) else { return }
+        let tmp = graph.nodes[a].y; graph.nodes[a].y = graph.nodes[b].y; graph.nodes[b].y = tmp
+        autoLayoutGroup(g)
+    }
+
     /// Grow a group's frame so it encloses all its members (+ padding). Only ever GROWS — the user's chosen
     /// size is a floor — so the frame stays a stable container while never visually clipping a member it owns.
     func fitGroupFrame(_ groupID: UUID) {
@@ -682,15 +718,15 @@ final class GraphEngine {
         graph.nodes[i].group?.height = Double(union.height)
     }
 
-    /// One-time upgrade for graphs authored before frames were explicit: size each group's frame to the bounds
-    /// of its members so loaded/example graphs render exactly as before, now as a real (resizable) container.
+    /// Load-time normalization: anchor each group's frame at its members' bounds, then re-stack the members
+    /// into the canonical tidy column (groups are MANAGED stacks now — assembly order is preserved because
+    /// the stack order is the same top→bottom order the executor reads).
     func normalizeGroupFrames() {
         for g in graph.nodes where g.kind == .promptGroup {
             guard let i = index(g.id), let bounds = memberBounds(of: g.id) else { continue }
             graph.nodes[i].x = bounds.minX
             graph.nodes[i].y = bounds.minY
-            graph.nodes[i].group?.width  = Double(max(GraphEngine.groupMinWidth, bounds.width))
-            graph.nodes[i].group?.height = Double(max(GraphEngine.groupMinHeight, bounds.height))
+            autoLayoutGroup(g.id)
         }
     }
 
