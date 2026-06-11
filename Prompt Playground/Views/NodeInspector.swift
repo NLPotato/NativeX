@@ -73,14 +73,14 @@ struct NodeInspector: View {
             Image(systemName: node.wrappedValue.kind.symbol).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 TextField("Title", text: node.title).dsTextField()
-                HStack(spacing: DS.Space.xs) {
+                HStack(spacing: DS.Space.sm) {
                     Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
-                    if let api = node.wrappedValue.apiName {   // friendly label + official API name (§6.1)
-                        Text("(\(api))").font(.dsCode).foregroundStyle(.tertiary)
-                    }
                     PortabilityBadge(portability: inspectorPortability, showLabel: true)   // §6.2
                 }
                 .lineLimit(1)
+                if let api = node.wrappedValue.apiName {   // official API name, full width — never truncated (§6.1)
+                    Text(api).font(.dsCode).foregroundStyle(.tertiary).lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
             // Walk to a connected node (prev = upstream feeders, next = downstream consumers) and center it.

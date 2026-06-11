@@ -424,7 +424,8 @@ private struct NodeCardView: View {
                     Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary)
                     if let api = node.apiName {
                         Text("·").font(.dsMicro).foregroundStyle(.tertiary)
-                        Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                        // The API name wins the squeeze — the kind label is usually echoed by the title.
+                        Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).layoutPriority(1)
                     }
                 }
                 .lineLimit(1)
