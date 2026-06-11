@@ -267,6 +267,27 @@ private struct EdgeHitLayer: View {
     }
 }
 
+// MARK: - Portability badge (design.md §6.2)
+
+/// Cyan `laptopcomputer.and.iphone` = runs sandboxed on iOS + macOS; gold `laptopcomputer` =
+/// macOS-only (sandbox off — client apps can't use it). Shared by the canvas headers + inspector.
+struct PortabilityBadge: View {
+    let portability: Portability
+    var showLabel = false
+
+    var body: some View {
+        HStack(spacing: DS.Space.xxs) {
+            Image(systemName: portability.isPortable ? "laptopcomputer.and.iphone" : "laptopcomputer")
+                .font(.dsCaption)
+            if showLabel { Text(portability.label).font(.dsMicro) }
+        }
+        .foregroundStyle(portability.isPortable ? Color.dsInfo : Color.dsWarning)
+        .help(portability.isPortable
+              ? "Runs sandboxed on iOS and macOS"
+              : "macOS only — needs the sandbox off; client iOS apps can’t use this")
+    }
+}
+
 // MARK: - Node card
 
 private struct NodeCardView: View {
@@ -409,6 +430,7 @@ private struct NodeCardView: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
+            PortabilityBadge(portability: node.portability)   // trailing end of the header chip (§6.2)
             statusDot
         }
         .padding(.horizontal, DS.Space.md)
@@ -756,6 +778,8 @@ private struct GroupFrameView: View {
             if let api = group.apiName {   // §6.1 — the request this group assembles
                 Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).lineLimit(1)
             }
+            // Most restrictive tier of the group's subgraph (a script hook upstream ⇒ macOS-only).
+            PortabilityBadge(portability: engine.graph.subgraphPortability(of: group.id))
             if dropping { Text("add").font(.dsMicro.weight(.semibold)).foregroundStyle(Theme.accent) }
             if !dropping, !issues.isEmpty {
                 Image(systemName: "exclamationmark.triangle.fill").font(.dsMicro).foregroundStyle(.dsWarning)

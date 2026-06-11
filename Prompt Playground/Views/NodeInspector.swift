@@ -53,6 +53,13 @@ struct NodeInspector: View {
         }
     }
 
+    /// A Prompt group's badge reflects its whole subgraph (most restrictive tier, §6.2);
+    /// every other node reports its own reach.
+    private var inspectorPortability: Portability {
+        guard let n = engine.graph.node(nodeID) else { return .universal }
+        return n.kind == .promptGroup ? engine.graph.subgraphPortability(of: nodeID) : n.portability
+    }
+
     private var nodeBinding: Binding<GraphNode>? {
         guard engine.graph.nodes.contains(where: { $0.id == nodeID }) else { return nil }
         return Binding(
@@ -71,6 +78,7 @@ struct NodeInspector: View {
                     if let api = node.wrappedValue.apiName {   // friendly label + official API name (§6.1)
                         Text("(\(api))").font(.dsCode).foregroundStyle(.tertiary)
                     }
+                    PortabilityBadge(portability: inspectorPortability, showLabel: true)   // §6.2
                 }
                 .lineLimit(1)
             }

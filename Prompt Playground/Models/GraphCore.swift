@@ -230,6 +230,15 @@ extension GraphNode {
         }
     }
 
+    /// Platform reach (design.md §6.2): every node is sandbox-safe on both platforms except a
+    /// script hook (`/bin/zsh` can't ship to the iOS client apps).
+    var portability: Portability {
+        switch kind {
+        case .nativeAPI, .hook: return hook?.op.portability ?? .universal
+        default:                return .universal
+        }
+    }
+
     static func promptGroup(title: String = "Prompt", x: Double = 0, y: Double = 0) -> GraphNode {
         GraphNode(kind: .promptGroup, x: x, y: y, title: title, group: PromptGroupPayload())
     }
@@ -375,6 +384,21 @@ struct GraphDef: Codable, Equatable, Sendable {
     /// Reverse of `promptGroupID(feeding:)` — `nil` ⇒ this group drives no model (an un-runnable lane).
     func fmID(fedBy groupID: UUID) -> UUID? {
         edges.first { $0.fromNodeID == groupID && node($0.toNodeID)?.kind == .fm }?.toNodeID
+    }
+
+    /// The most restrictive platform tier in a prompt group's subgraph: its member blocks plus
+    /// everything feeding them, transitively — a group with a script hook anywhere upstream is
+    /// macOS-only (design.md §6.2: the group badge shows the most restrictive tier).
+    func subgraphPortability(of groupID: UUID) -> Portability {
+        var queue = members(of: groupID).map(\.id)
+        var seen = Set(queue); seen.insert(groupID)
+        while let id = queue.popLast() {
+            if let n = node(id), !n.portability.isPortable { return n.portability }
+            for e in incoming(id) where seen.insert(e.fromNodeID).inserted {
+                queue.append(e.fromNodeID)
+            }
+        }
+        return .universal
     }
 }
 
