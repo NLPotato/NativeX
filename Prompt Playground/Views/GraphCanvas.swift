@@ -17,22 +17,19 @@ let graphBoardSpace = "graphboard"
 /// Identifiable wrapper so a bare node UUID can drive a `.sheet(item:)` (the compare config sheet).
 private struct CanvasSheetID: Identifiable { let id: UUID }
 
-/// Per-kind accent so the board reads as a typed pipeline at a glance rather than a wall of grey. Calm,
-/// distinct hues (not neon) — used on the node icon, a faint header wash, and the selected border/glow.
+/// Category color per node FAMILY (design.md §5.2) — the 30% budget. Used on the node icon, the header
+/// wash, the selected border/glow, and selection-adjacent wires. Never applied as a solid fill.
 func kindTint(_ kind: NodeKind) -> Color {
     switch kind {
-    case .promptGroup: return Theme.accent
-    case .instruction: return .blue
-    case .fewshot:     return .indigo
-    case .history:     return .purple
-    case .current:     return .pink
-    case .guided:      return .white
-    case .tool:        return .orange
-    case .input:       return .gray
-    case .nativeAPI:   return Theme.cyan
-    case .hook:        return .brown
-    case .fm:          return Theme.accent
-    case .compare:     return .yellow
+    case .promptGroup: return Theme.accent                  // container — accent identity on selection
+    case .instruction, .fewshot, .history, .current:
+        return Theme.cyan                                   // prompt blocks — dsInfo
+    case .guided, .tool: return Theme.cyan.opacity(0.6)     // schema/tool blocks — dsInfo @ 60%
+    case .input:       return .gray                         // data source — neutral, no category color
+    case .nativeAPI:   return .gray                         // utility — neutral (the cyan badge carries the hue)
+    case .hook:        return Theme.gold                    // developer/power — macOS-only gold
+    case .fm:          return Theme.accent                  // execution — accent + radiance
+    case .compare:     return Theme.pink                    // analysis — pink
     }
 }
 
@@ -288,26 +285,16 @@ private struct NodeCardView: View {
     private var nodeHovered: Bool { engine.hoveredNode == node.id }
     private var issues: [GraphIssue] { engine.issues(for: node.id) }   // pre-run structural problems
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider().opacity(0.25)
-            ForEach(0..<NodeMetrics.rows(node), id: \.self) { row in
-                portRow(row).frame(height: NodeMetrics.portSlot)
-            }
-            if let preview = NodeMetrics.previewText(node) {
-                promptBand(preview)
-            } else {
-                Spacer(minLength: 0)
-            }
+    /// Compact "header chip" nodes (design.md §5.1/§5.2): no heavy content → the card is one glass piece.
+    private var isGlassChip: Bool {
+        switch node.kind {
+        case .input, .nativeAPI, .hook, .compare: return true
+        default: return false
         }
-        .frame(width: NodeMetrics.width(node), height: NodeMetrics.height(node), alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-                    .fill(tint.opacity(selected ? 0.16 : 0.05)))   // kind identity; brighter when active
-        )
+    }
+
+    var body: some View {
+        surfaced
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
             .strokeBorder(borderColor, lineWidth: selected ? 2.5 : 1))
         .runningRadiance(active: run?.status == .running, corner: DS.Radius.md)   // the running node blooms
@@ -327,6 +314,42 @@ private struct NodeCardView: View {
             if NSEvent.modifierFlags.contains(.shift) { engine.toggleSelect(node.id) } else { engine.selectOnly(node.id) }
         }
         .gesture(moveGesture)
+    }
+
+    /// §5.2 surface application: glass chip for compact nodes (selected = accent-of-kind tinted glass),
+    /// opaque material card for content nodes — with the prompt-block cyan left stripe.
+    @ViewBuilder private var surfaced: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+        if isGlassChip {
+            content.glassEffect(selected ? .regular.tint(tint.opacity(0.16)) : .regular, in: shape)
+        } else {
+            content.background(
+                shape.fill(.ultraThinMaterial)
+                    .overlay(shape.fill(tint.opacity(selected ? 0.16 : 0.05)))   // kind identity wash
+                    .overlay(alignment: .leading) {
+                        if node.kind.isBlock {   // prompt-block identity stripe (§5.2)
+                            Rectangle().fill(tint.opacity(0.8)).frame(width: 3)
+                        }
+                    }
+                    .clipShape(shape)
+            )
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().opacity(0.25)
+            ForEach(0..<NodeMetrics.rows(node), id: \.self) { row in
+                portRow(row).frame(height: NodeMetrics.portSlot)
+            }
+            if let preview = NodeMetrics.previewText(node) {
+                promptBand(preview)
+            } else {
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(width: NodeMetrics.width(node), height: NodeMetrics.height(node), alignment: .topLeading)
     }
 
     /// Bottom-right corner grip: drag to freely resize the card in BOTH axes (width + height), each
@@ -354,8 +377,9 @@ private struct NodeCardView: View {
 
     private var tint: Color { kindTint(node.kind) }
 
-    private var header: some View {
-        HStack(spacing: DS.Space.sm) {
+    @ViewBuilder private var header: some View {
+        let top = UnevenRoundedRectangle(topLeadingRadius: DS.Radius.md, topTrailingRadius: DS.Radius.md)
+        let row = HStack(spacing: DS.Space.sm) {
             Image(systemName: node.kind.symbol)
                 .font(.dsBody.weight(.semibold))
                 .foregroundStyle(tint)                  // each kind's hue rides on its icon
@@ -382,8 +406,14 @@ private struct NodeCardView: View {
         }
         .padding(.horizontal, DS.Space.md)
         .frame(height: NodeMetrics.header, alignment: .center)
-        .background(tint.opacity(selected ? 0.18 : 0.10), in: UnevenRoundedRectangle(
-            topLeadingRadius: DS.Radius.md, topTrailingRadius: DS.Radius.md))   // colored header strip
+
+        if node.kind == .fm {
+            row.glassEffect(.regular, in: top)   // glass header chip on an opaque body (§5.2)
+        } else if isGlassChip {
+            row                                  // the whole card is already one glass chip
+        } else {
+            row.background(tint.opacity(selected ? 0.18 : 0.10), in: top)   // colored header strip
+        }
     }
 
     @ViewBuilder private var statusDot: some View {
@@ -526,10 +556,14 @@ private struct NodeCardView: View {
 
     private var borderColor: Color {
         if selected { return tint }                      // selected border carries the node's own hue
-        switch run?.status {
-        case .error: return Color.dsDanger.opacity(0.7)
-        case .none:  return issues.isEmpty ? .dsHairline : Theme.gold.opacity(0.65)  // amber = not ready
-        default:     return .dsHairline                  // success is shown by the status dot, not green chrome
+        if run?.status == .error { return Color.dsDanger.opacity(0.7) }
+        if run == nil, !issues.isEmpty { return Theme.gold.opacity(0.65) }   // amber = not ready
+        // Persistent category borders (§5.2): FM accent, Hook gold, Compare pink; the rest neutral.
+        switch node.kind {
+        case .fm:      return Theme.accent.opacity(0.45)
+        case .hook:    return Theme.gold.opacity(0.55)
+        case .compare: return Theme.pink.opacity(0.55)
+        default:       return .dsHairline                // success is shown by the status dot, not chrome
         }
     }
 
@@ -663,10 +697,11 @@ private struct GroupFrameView: View {
     private var issues: [GraphIssue] { engine.issues(inGroup: group.id) }   // group + members, once it feeds an FM
 
     /// Amber dashed frame when the Prompt is incomplete (no current turn / unbound var) — the at-a-glance
-    /// "this won't run" signal, so the failure is visible at authoring time, not only on Run.
+    /// "this won't run" signal. Accent identity appears on the selected/dropping state only (§5.2);
+    /// an idle, healthy frame is neutral chrome.
     private var frameStroke: Color {
         if dropping || selected { return Theme.accent.opacity(0.85) }
-        return issues.isEmpty ? Theme.accent.opacity(0.30) : Theme.gold.opacity(0.6)
+        return issues.isEmpty ? Color.white.opacity(0.18) : Theme.gold.opacity(0.6)
     }
 
     var body: some View {

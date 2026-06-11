@@ -134,7 +134,7 @@ struct CompareLinkLine: View {
             let midY = (from.y + to.y) / 2
             p.addCurve(to: to, control1: CGPoint(x: from.x, y: midY), control2: CGPoint(x: to.x, y: midY))
         }
-        .stroke(Theme.accent.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+        .stroke(Theme.pink.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5, 4]))   // compare = pink (§5.2)
         .frame(width: 8000, height: 8000, alignment: .topLeading)
         .allowsHitTesting(false)
     }
@@ -167,15 +167,15 @@ struct CompareResultCluster: View {
                 .frame(maxWidth: 480)
             }
         }
-        // Content-heavy floating result → opaque card, not glass (design.md §3.5).
+        // Content-heavy floating result → opaque card, not glass (design.md §3.5). Pink = compare identity.
         .dsCard(radius: DS.Radius.lg)
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Theme.accent.opacity(0.3)))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Theme.pink.opacity(0.3)))
         .sheet(isPresented: $showExpanded) { CompareResultView(outcome: outcome) }
     }
 
     private var header: some View {
         HStack(spacing: DS.Space.sm) {
-            Image(systemName: "rectangle.split.3x1").foregroundStyle(Theme.accent)
+            Image(systemName: "rectangle.split.3x1").foregroundStyle(Theme.pink)
             Text("Comparison").font(.dsCaption.weight(.bold))
             Text(outcome.datasetName != nil ? "\(outcome.lanes.count) lanes × \(outcome.rows) rows"
                                             : "\(outcome.lanes.count) lanes")
