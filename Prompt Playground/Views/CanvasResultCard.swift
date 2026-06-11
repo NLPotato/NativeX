@@ -2,10 +2,11 @@
 //  CanvasResultCard.swift
 //  Prompt Playground
 //
-//  The single-run result, rendered as a white, full-opacity card floating beside the terminal FM node.
-//  It is a VIEW-ONLY overlay — never a graph node (no ports, not in GraphDef, ignored by topo/exec). It
-//  lives in the canvas's scaled layer so it pans/zooms with the board; drag adds a free offset (divided
-//  by scale to track the cursor 1:1), and the X dismisses it until the next run. (Phase 4.)
+//  The single-run result, floating beside the terminal FM node — same dark surface language as the
+//  nodes, with JSON output rendered as a structured key-value outline (JSONOutlineView) instead of raw
+//  indented JSON. It is a VIEW-ONLY overlay — never a graph node (no ports, not in GraphDef, ignored by
+//  topo/exec). It lives in the canvas's scaled layer so it pans/zooms with the board; drag adds a free
+//  offset (divided by scale to track the cursor 1:1), and the X dismisses it until the next run.
 //
 
 import SwiftUI
@@ -30,19 +31,22 @@ struct CanvasResultCard: View {
             .font(.dsMicro)
             Divider()
             ScrollView {
-                Text(text).font(.dsBody).foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Group {
+                    if let node = JSONOutline.parse(text), node.isContainer {
+                        JSONOutlineView(node: node)   // structured outline, schema key order preserved
+                    } else {
+                        Text(text).font(.dsBody).foregroundStyle(.primary)
+                    }
+                }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 220)
+            .frame(maxHeight: 260)
         }
         .padding(DS.Space.md)
-        .frame(width: 320, alignment: .leading)
-        // A white "printed artifact" — light scheme so the semantic text roles resolve dark-on-light
-        // (no hand-mixed black opacities, per design.md §3.4).
-        .environment(\.colorScheme, .light)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: DS.Radius.md))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(.black.opacity(0.12)))
+        .frame(width: 340, alignment: .leading)
+        .background(.dsSurface, in: RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous).strokeBorder(.dsHairline))
         .shadow(color: .black.opacity(0.35), radius: 16, y: 6)   // floats above the board as a distinct artifact
         .gesture(
             DragGesture(coordinateSpace: .named(graphBoardSpace))

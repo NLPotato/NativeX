@@ -614,7 +614,7 @@ private struct FMEditor: View {
                     .font(.dsCaption).foregroundStyle(.dsDanger).fixedSize(horizontal: false, vertical: true)
             }
             if let json = run.outputs["json"], !json.isEmpty {
-                OutputBlock(title: "Generation (JSON)", text: prettyJSONString(json))
+                OutputBlock(title: "Generation (JSON)", text: prettyJSONString(json), structured: true)
             } else if let out = run.outputs["output"], !out.isEmpty {
                 OutputBlock(title: "Generation", text: out)
             }
@@ -764,10 +764,12 @@ private struct ResolvedOutputSection: View {
     }
 }
 
-/// A read-only monospace text panel with a copy button.
+/// A read-only output panel with a copy button. `structured` renders parseable JSON as a key-value
+/// outline (JSONOutlineView) — copy still copies the raw text; non-JSON falls back to monospace.
 private struct OutputBlock: View {
     let title: String
     let text: String
+    var structured: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
@@ -781,10 +783,16 @@ private struct OutputBlock: View {
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Copy").disabled(text.isEmpty)
             }
             ScrollView {
-                Text(text.isEmpty ? "—" : text)
-                    .font(.dsCode).foregroundStyle(.primary).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(DS.Space.sm)
+                Group {
+                    if structured, let node = JSONOutline.parse(text), node.isContainer {
+                        JSONOutlineView(node: node)
+                    } else {
+                        Text(text.isEmpty ? "—" : text).font(.dsCode).foregroundStyle(.primary)
+                    }
+                }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(DS.Space.sm)
             }
             .frame(maxHeight: 220)
             .codeSurface()
