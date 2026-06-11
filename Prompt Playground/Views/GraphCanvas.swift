@@ -345,7 +345,7 @@ private struct NodeCardView: View {
             content.glassEffect(selected ? .regular.tint(tint.opacity(0.16)) : .regular, in: shape)
         } else {
             content.background(
-                shape.fill(.ultraThinMaterial)
+                shape.fill(.dsSurface)
                     .overlay(shape.fill(tint.opacity(selected ? 0.16 : 0.05)))   // kind identity wash
                     .overlay(alignment: .leading) {
                         if node.kind.isBlock {   // prompt-block identity stripe (§5.2)

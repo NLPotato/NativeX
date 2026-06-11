@@ -59,6 +59,12 @@ extension ShapeStyle where Self == Color {
     static var dsHairline: Color { .white.opacity(0.10) }
 }
 
+extension ShapeStyle where Self == Material {
+    /// The one frosted surface behind opaque cards (dsCard + canvas node cards). Views never pick
+    /// a Material directly — they ask for this role (design.md §2.1.4).
+    static var dsSurface: Material { .ultraThinMaterial }
+}
+
 // MARK: - Liquid Glass (floating chrome — see design.md §3.5/§4.5)
 
 extension Glass {
