@@ -271,6 +271,25 @@ final class RunModel {
     }
 }
 
+// MARK: - Saved hook scripts (the script op's reusable library — authored in the Hook inspector)
+
+@Model
+final class HookScriptModel {
+    var id: UUID
+    var createdAt: Date
+    var name: String
+    var command: String
+    var notes: String = ""
+
+    init(name: String, command: String, notes: String = "") {
+        self.id = UUID()
+        self.createdAt = Date()
+        self.name = name
+        self.command = command
+        self.notes = notes
+    }
+}
+
 // MARK: - Node graphs (the visual ComfyUI/FigJam-style canvas; whole GraphDef as one JSON blob)
 
 @Model
@@ -330,6 +349,6 @@ final class TraceModel {
 enum PlaygroundStore {
     static let models: [any PersistentModel.Type] = [
         PromptTemplateModel.self, SchemaModel.self, DatasetModel.self, ExampleModel.self,
-        ExperimentModel.self, RunModel.self, GraphModel.self, TraceModel.self
+        ExperimentModel.self, RunModel.self, GraphModel.self, TraceModel.self, HookScriptModel.self
     ]
 }

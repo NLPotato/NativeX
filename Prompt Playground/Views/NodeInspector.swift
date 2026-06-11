@@ -251,17 +251,61 @@ private struct FewshotEditor: View {
 
 private struct GuidedEditor: View {
     @Binding var node: GraphNode
+    @Environment(\.modelContext) private var context
+    @Query(sort: \SchemaModel.createdAt, order: .reverse) private var library: [SchemaModel]
+    @State private var savedNote: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             Text("Constrain the model’s output to this schema (Apple Guided Generation). This is where you author the output contract.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
+            // Library: load a saved schema into this node, or save this one (versioned, like prompt
+            // templates) so other graphs and the Lab's dynamic lane can reuse it.
+            HStack(spacing: DS.Space.sm) {
+                Menu {
+                    if library.isEmpty { Text("No saved schemas yet") }
+                    ForEach(library) { m in
+                        Button("\(m.name) v\(m.version)") { if let def = m.def { node.guided?.schemaDef = def } }
+                    }
+                } label: { Label("Load", systemImage: "tray.and.arrow.up") }
+                .menuStyle(.borderlessButton).fixedSize()
+
+                Button { saveToLibrary() } label: { Label("Save to library", systemImage: "tray.and.arrow.down") }
+                    .buttonStyle(.borderless)
+                Spacer(minLength: 0)
+                if let savedNote { Text(savedNote).font(.dsMicro).foregroundStyle(.dsSuccess) }
+            }
+            .font(.dsCaption)
+
             SchemaEditorView(def: schemaBinding)
+
+            // The promotion path to the typed shipping lane: compile-safe @Generable Swift for this
+            // schema (SwiftCodegen), ready to paste into the iOS client app.
+            DisclosureGroup {
+                OutputBlock(title: "Copy into the client app target",
+                            text: SwiftCodegen.emit(schemaBinding.wrappedValue))
+                    .padding(.top, DS.Space.sm)
+            } label: {
+                HStack(spacing: DS.Space.sm) {
+                    Text("@Generable Swift").font(.dsLabel)
+                    Text("the typed shipping lane").font(.dsCodeMicro).foregroundStyle(.tertiary)
+                }
+            }
         }
     }
 
     private var schemaBinding: Binding<SchemaDef> {
         Binding(get: { node.guided?.schemaDef ?? .blank }, set: { node.guided?.schemaDef = $0 })
+    }
+
+    /// Insert a new SchemaModel version (same name ⇒ next version number — the template convention).
+    private func saveToLibrary() {
+        guard let def = node.guided?.schemaDef else { return }
+        let version = (library.filter { $0.name == def.typeName }.map(\.version).max() ?? 0) + 1
+        context.insert(SchemaModel(task: .custom, name: def.typeName, version: version, def: def))
+        try? context.save()
+        savedNote = "Saved \(def.typeName) v\(version)"
     }
 }
 
@@ -513,8 +557,12 @@ private struct HookEditor: View {
                     DSField(label: "out (output var)") { TextField("output", text: h.outputVar).dsTextField() }
                 }
                 ForEach(node.hook?.op.paramKeys ?? [], id: \.self) { param in
-                    DSField(label: param.label, help: param.placeholder) {
-                        TextField(param.placeholder, text: paramBinding(param.rawValue)).dsTextField()
+                    if param == .command {
+                        ScriptCommandEditor(node: $node)
+                    } else {
+                        DSField(label: param.label, help: param.placeholder) {
+                            TextField(param.placeholder, text: paramBinding(param.rawValue)).dsTextField()
+                        }
                     }
                 }
             }
@@ -576,6 +624,64 @@ private struct OpCatalogPicker: View {
             .frame(maxHeight: 230)
         }
         .dsGroup()
+    }
+}
+
+/// Multi-line authoring surface for the script op's command + the persistent script library
+/// (HookScriptModel) — the "add a new script" interface. The I/O contract is the documented
+/// boundary (ADR-20260608-script-hooks): input → stdin · trimmed stdout → out var · every context
+/// var exported as $PP_NAME · non-zero exit or timeout ⇒ node error carrying stderr.
+private struct ScriptCommandEditor: View {
+    @Binding var node: GraphNode
+    @Environment(\.modelContext) private var context
+    @Query(sort: \HookScriptModel.createdAt, order: .reverse) private var scripts: [HookScriptModel]
+    @State private var savedNote: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSField(label: "command — /bin/zsh",
+                    help: "stdin ← in var · stdout → out var · context vars as $PP_NAME · non-zero exit or timeout ⇒ node error") {
+                TextEditor(text: commandBinding).font(.dsCode).dsEditor(lines: 6)
+            }
+            HStack(spacing: DS.Space.sm) {
+                Menu {
+                    if scripts.isEmpty { Text("No saved scripts yet") }
+                    ForEach(scripts) { s in
+                        Button(s.name) { node.hook?.params[HookParam.command.rawValue] = s.command }
+                    }
+                    if !scripts.isEmpty {
+                        Divider()
+                        Menu("Delete…") {
+                            ForEach(scripts) { s in
+                                Button(s.name, role: .destructive) { context.delete(s); try? context.save() }
+                            }
+                        }
+                    }
+                } label: { Label("Scripts", systemImage: "tray.full") }
+                .menuStyle(.borderlessButton).fixedSize()
+
+                Button { saveScript() } label: { Label("Save script", systemImage: "tray.and.arrow.down") }
+                    .buttonStyle(.borderless)
+                    .disabled(command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer(minLength: 0)
+                if let savedNote { Text(savedNote).font(.dsMicro).foregroundStyle(.dsSuccess) }
+            }
+            .font(.dsCaption)
+        }
+    }
+
+    private var command: String { node.hook?.params[HookParam.command.rawValue] ?? "" }
+    private var commandBinding: Binding<String> {
+        Binding(get: { command }, set: { node.hook?.params[HookParam.command.rawValue] = $0 })
+    }
+
+    /// Save under the node's title, else the command's first line — enough identity to re-find it.
+    private func saveScript() {
+        let firstLine = String((command.split(separator: "\n").first.map(String.init) ?? "script").prefix(40))
+        let name = node.title.isEmpty ? firstLine : node.title
+        context.insert(HookScriptModel(name: name, command: command))
+        try? context.save()
+        savedNote = "Saved “\(name)”"
     }
 }
 
