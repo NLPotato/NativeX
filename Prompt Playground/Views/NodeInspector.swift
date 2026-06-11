@@ -44,6 +44,7 @@ struct NodeInspector: View {
                     header(node)
                     Divider()
                     editor(node)
+                    APIMappingSection(engine: engine, nodeID: nodeID)
                 }
                 .padding(DS.Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -498,13 +499,10 @@ private struct HookEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let h = $node.hook.defaulted(HookDef(op: .textTransform)) {
-                DSField(label: "Operation") {
-                    Picker("", selection: h.opRaw) {
-                        ForEach(opChoices, id: \.self) { Text($0.displayName).tag($0.rawValue) }
-                    }.labelsHidden()
-                }
+                OpCatalogPicker(node: $node)
                 if let op = node.hook?.op {
                     Text(op.detail).font(.dsCaption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !op.portability.isPortable {
                         Label(op.portability.label, systemImage: "exclamationmark.triangle")
                             .font(.dsMicro).foregroundStyle(.dsWarning)
@@ -525,17 +523,107 @@ private struct HookEditor: View {
         }
     }
 
-    private var opChoices: [HookOp] {
-        node.kind == .nativeAPI
-            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit]
-            : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform]
-    }
     private var hookOutput: String? {
         let key = (node.hook?.outputVar.isEmpty ?? true) ? "output" : (node.hook?.outputVar ?? "output")
         return run?.outputs[key]
     }
     private func paramBinding(_ key: String) -> Binding<String> {
         Binding(get: { node.hook?.params[key] ?? "" }, set: { node.hook?.params[key] = $0 })
+    }
+}
+
+/// Searchable catalog picker for the Native API / Hook operation (PRD §4.2, §8.3-lite): search by
+/// name, official symbol, or framework; each row teaches the underlying API. PRD-planned ops
+/// (Vision OCR/barcode, Spotlight, Evaluate) are listed but not selectable.
+private struct OpCatalogPicker: View {
+    @Binding var node: GraphNode
+    @State private var query = ""
+
+    /// Ops offered for this node kind (mirrors the original split: NL/FM ops on a Native API node;
+    /// glue/script ops on a Hook node). Planned entries surface on the Native API side only.
+    private var candidates: [APICatalogEntry] {
+        let ops: [HookOp] = node.kind == .nativeAPI
+            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .countTokens]
+            : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform]
+        let available = ops.compactMap(APICatalog.entry(for:))
+        let planned = node.kind == .nativeAPI ? APICatalog.entries.filter { $0.status == .planned } : []
+        return available + planned
+    }
+    private var matches: [APICatalogEntry] { APICatalog.search(query, in: candidates) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSSectionHeader("Operation")
+            HStack(spacing: DS.Space.sm) {
+                Image(systemName: "magnifyingglass").font(.dsCaption).foregroundStyle(.tertiary)
+                TextField("Search APIs — name, symbol, framework…", text: $query)
+                    .textFieldStyle(.plain).font(.dsCaption)
+            }
+            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
+
+            ScrollView {
+                VStack(spacing: DS.Space.xs) {
+                    ForEach(matches) { OpRow(entry: $0, node: $node) }
+                    if matches.isEmpty {
+                        Text("No API matches “\(query)”.")
+                            .font(.dsCaption).foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(DS.Space.sm)
+                    }
+                }
+            }
+            .frame(maxHeight: 230)
+        }
+        .dsGroup()
+    }
+}
+
+private struct OpRow: View {
+    let entry: APICatalogEntry
+    @Binding var node: GraphNode
+
+    private var isSelected: Bool { entry.op != nil && node.hook?.op == entry.op }
+    private var selectable: Bool { entry.status == .available && entry.op != nil }
+
+    var body: some View {
+        Button {
+            guard let op = entry.op else { return }
+            // Refresh the output var only when it's still the previous op's default (don't clobber
+            // a custom name); params persist — matching keys carry across ops.
+            let oldDefault = node.hook?.op.defaultOutputVar
+            node.hook?.opRaw = op.rawValue
+            if (node.hook?.outputVar.isEmpty ?? true) || node.hook?.outputVar == oldDefault {
+                node.hook?.outputVar = op.defaultOutputVar
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                HStack(spacing: DS.Space.sm) {
+                    Text(entry.name).font(.dsLabel)
+                        .foregroundStyle(selectable ? Color.primary : Color.secondary)
+                    Text(entry.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    if entry.status == .planned {
+                        Text("planned").dsBadge(.secondary)
+                    } else if !entry.portability.isPortable {
+                        Text(entry.portability.label).dsBadge(.dsWarning)
+                    }
+                }
+                HStack(spacing: DS.Space.sm) {
+                    Text(entry.framework).font(.dsMicro).foregroundStyle(.dsInfo)
+                    Text(entry.summary).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            .padding(DS.Space.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Theme.accent.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm)
+                .strokeBorder(isSelected ? Theme.accent.opacity(0.5) : .clear))
+        }
+        .buttonStyle(.plain)
+        .disabled(!selectable)
+        .help(entry.status == .planned ? "Planned (PRD §5.4.1) — not yet executable in this build" : entry.summary)
     }
 }
 
@@ -649,6 +737,86 @@ private struct FMEditor: View {
             }
             .frame(maxWidth: .infinity).padding(.vertical, DS.Space.xl)
         }
+    }
+}
+
+// MARK: - API mapping (every node: which Apple API, which argument, fed by which control)
+
+/// The "what does this GUI actually call" section (UX-First §4.2): every Apple API call the
+/// selected node performs, each argument mapped to the control / wire that feeds it — with live
+/// current values — plus a link into Apple Developer Documentation (§8.3-lite). Data lives in
+/// APICatalog so the node-header chip, the op picker, and this section can never drift.
+private struct APIMappingSection: View {
+    let engine: GraphEngine
+    let nodeID: UUID
+    @State private var expanded = false
+
+    var body: some View {
+        if let node = engine.graph.node(nodeID) {
+            let calls = APICatalog.calls(for: node, graph: engine.graph)
+            if !calls.isEmpty {
+                DisclosureGroup(isExpanded: $expanded) {
+                    VStack(alignment: .leading, spacing: DS.Space.md) {
+                        ForEach(calls) { APICallView(call: $0) }
+                    }
+                    .padding(.top, DS.Space.sm)
+                } label: {
+                    HStack(spacing: DS.Space.sm) {
+                        Image(systemName: "function").font(.dsCaption).foregroundStyle(.secondary)
+                        Text("API mapping").font(.dsLabel)
+                        Text("\(calls.count) call\(calls.count == 1 ? "" : "s")")
+                            .font(.dsMicro).foregroundStyle(.tertiary)
+                    }
+                }
+                .dsGroup()
+            }
+        }
+    }
+}
+
+private struct APICallView: View {
+    let call: APICall
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.sm) {
+                Text(call.symbol).font(.dsCode.weight(.semibold)).textSelection(.enabled)
+                Spacer(minLength: 0)
+                if let url = call.docURL {
+                    Link(destination: url) {
+                        Label("Docs", systemImage: "arrow.up.right.square").font(.dsMicro)
+                    }
+                    .help("Open in Apple Developer Documentation")
+                }
+            }
+            Text(call.signature).font(.dsCodeMicro).foregroundStyle(.secondary)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            ForEach(call.args) { arg in
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.sm) {
+                    Text(arg.name).font(.dsCodeMicro)
+                        .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
+                        .background(.quaternary, in: Capsule())
+                    Text(arg.type).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    Image(systemName: "arrow.left").font(.dsMicro).foregroundStyle(.tertiary)
+                    Text(arg.source).font(.dsMicro).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let returns = call.returns {
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.sm) {
+                    Image(systemName: "arrow.turn.down.right").font(.dsMicro).foregroundStyle(.tertiary)
+                    Text(returns).font(.dsMicro).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let note = call.note {
+                Label(note, systemImage: "info.circle").font(.dsMicro).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(DS.Space.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
     }
 }
 

@@ -90,6 +90,16 @@ enum HookEngine {
             return enrich(input, language: params[HookParam.language.rawValue] ?? "")
         case .detectLanguage:
             return LanguageTools.detect(input)?.rawValue ?? "und"
+        case .countTokens:
+            // Heuristic estimate. TODO(Xcode 26.4 SDK): route through SystemLanguageModel
+            // .tokenCount(for:) behind #available(macOS 26.4, *) — neither that symbol nor
+            // contextSize exists in the 26.2 SDK (verified; see the TokenEstimator note).
+            let count = TokenEstimator.estimate(input)
+            if (params[HookParam.tokenFormat.rawValue] ?? "count") == "report" {
+                let pct = Double(count) / Double(TokenEstimator.contextWindow) * 100
+                return "≈\(count) tokens · \(String(format: "%.1f", pct))% of the \(TokenEstimator.contextWindow)-token window"
+            }
+            return String(count)
         case .regexExtract:
             return try regexExtract(input, pattern: params[HookParam.pattern.rawValue] ?? "",
                                     group: Int(params[HookParam.group.rawValue] ?? "0") ?? 0)

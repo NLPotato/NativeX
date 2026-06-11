@@ -40,6 +40,7 @@ enum Portability: String, Codable, Sendable {
 /// Editable parameters an op reads out of `HookDef.params`. Each renders one labelled field.
 enum HookParam: String, Sendable, Hashable {
     case language, format, pattern, group, replacement, path, mode, command, timeout
+    case tokenFormat   // countTokens: number only, or a human context-share report
 
     var label: String {
         switch self {
@@ -52,6 +53,7 @@ enum HookParam: String, Sendable, Hashable {
         case .mode:        return "mode"
         case .command:     return "command"
         case .timeout:     return "timeout"
+        case .tokenFormat: return "format"
         }
     }
     var placeholder: String {
@@ -65,6 +67,7 @@ enum HookParam: String, Sendable, Hashable {
         case .mode:        return "trim | lower | upper | trimlines"
         case .command:     return "shell command — input on stdin, stdout becomes the output var"
         case .timeout:     return "seconds (default 30)"
+        case .tokenFormat: return "count | report (≈tokens · % of window)"
         }
     }
 }
@@ -73,6 +76,7 @@ enum HookParam: String, Sendable, Hashable {
 /// round-trips through plain Codable with no hand-written enum coding — mirrors `taskRaw`.
 enum HookOp: String, Codable, CaseIterable, Sendable {
     case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit
+    case countTokens
     case regexExtract, regexReplace, jsonExtract, textTransform
     case script
 
@@ -82,6 +86,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "Enrich tokens"
         case .detectLanguage: return "Detect language"
         case .sentenceSplit:  return "Split sentences"
+        case .countTokens:    return "Count tokens"
         case .regexExtract:   return "Regex extract"
         case .regexReplace:   return "Regex replace"
         case .jsonExtract:    return "JSON extract"
@@ -95,6 +100,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "NaturalLanguage POS + lemma + romanization per word"
         case .detectLanguage: return "NLLanguageRecognizer → dominant language code"
         case .sentenceSplit:  return "NLTokenizer → one sentence per line"
+        case .countTokens:    return "Token count vs the 4096-token context window — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
         case .regexExtract:   return "First match (or capture group) of a pattern"
         case .regexReplace:   return "Replace every match of a pattern"
         case .jsonExtract:    return "Read a dotted key path out of JSON"
@@ -125,6 +131,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return [.language]
         case .sentenceSplit:  return [.format]
         case .detectLanguage: return []
+        case .countTokens:    return [.tokenFormat]
         case .regexExtract:   return [.pattern, .group]
         case .regexReplace:   return [.pattern, .replacement]
         case .jsonExtract:    return [.path]
@@ -139,6 +146,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "tokens"
         case .detectLanguage: return "language"
         case .sentenceSplit:  return "sentences"
+        case .countTokens:    return "tokenCount"
         case .regexExtract:   return "match"
         case .regexReplace:   return "replaced"
         case .jsonExtract:    return "field"

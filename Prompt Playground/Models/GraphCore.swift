@@ -217,16 +217,9 @@ extension GraphNode {
         case .fm:          return "LanguageModelSession"
         case .compare:     return "ComparePayload"
         case .nativeAPI, .hook:
-            switch hook?.op {
-            case .tokenizeWords, .sentenceSplit: return "NLTokenizer"
-            case .enrichGloss:    return "NLTagger"
-            case .detectLanguage: return "NLLanguageRecognizer"
-            case .regexExtract, .regexReplace: return "Regex"
-            case .jsonExtract:    return "JSONSerialization"
-            case .textTransform:  return "Foundation"
-            case .script:         return "/bin/zsh"
-            case nil:             return nil
-            }
+            // One source of truth: the APICatalog entry's first call symbol (its doc + argument
+            // mapping render in the inspector's "API mapping" section).
+            return hook.flatMap { APICatalog.entry(for: $0.op)?.calls.first?.symbol }
         }
     }
 
