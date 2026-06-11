@@ -113,7 +113,7 @@ private struct TraceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             HStack(spacing: DS.Space.sm) {
-                StatusDot(ok: trace.status == "ok")
+                StatusDot(ok: trace.status == "ok", subtle: true)
                 Text(trace.sourceName).font(.dsLabel).lineLimit(1)
                 Spacer()
                 Text(trace.createdAt, format: .dateTime.hour().minute().second())
@@ -240,9 +240,15 @@ private struct StepView: View {
 
 private struct StatusDot: View {
     let ok: Bool
+    var subtle: Bool = false   // list rows: a quiet dot, not a column of filled glyphs (60-30-10)
     var body: some View {
-        Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-            .font(.dsCaption).foregroundStyle(ok ? Color.dsSuccess : Color.dsDanger)
+        if subtle {
+            Circle().fill(ok ? Color.dsSuccess.opacity(0.8) : Color.dsDanger)
+                .frame(width: 7, height: 7)
+        } else {
+            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.dsCaption).foregroundStyle(ok ? Color.dsSuccess : Color.dsDanger)
+        }
     }
 }
 

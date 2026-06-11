@@ -218,9 +218,9 @@ private struct EdgeLayer: View {
             if let pt = engine.pendingPoint {
                 let dash = StrokeStyle(lineWidth: 2, dash: [6, 4])
                 if let pf = engine.pendingFrom, let a = pendingOutputAnchor(pf) {
-                    ctx.stroke(graphEdgeCurve(a, pt), with: .color(Theme.accent.opacity(0.5)), style: dash)
+                    ctx.stroke(graphEdgeCurve(a, pt), with: .color(Theme.cyan.opacity(0.6)), style: dash)
                 } else if let pi = engine.pendingFromInput, let a = pendingInputAnchor(pi) {
-                    ctx.stroke(graphEdgeCurve(pt, a), with: .color(Theme.accent.opacity(0.5)), style: dash)
+                    ctx.stroke(graphEdgeCurve(pt, a), with: .color(Theme.cyan.opacity(0.6)), style: dash)
                 }
             }
         }
@@ -482,10 +482,10 @@ private struct NodeCardView: View {
         let active = wired || hovered
         return Text(name)
             .font(.dsCodeMicro.weight(.medium)).lineLimit(1)
-            .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+            .foregroundStyle(active ? AnyShapeStyle(Theme.cyan) : AnyShapeStyle(.secondary))
             .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
-            .background(Capsule().fill(active ? AnyShapeStyle(Theme.accent.opacity(0.16)) : AnyShapeStyle(.quaternary)))
-            .overlay(Capsule().strokeBorder(active ? AnyShapeStyle(Theme.accent.opacity(0.4)) : AnyShapeStyle(.dsHairline), lineWidth: 0.8))
+            .background(Capsule().fill(active ? AnyShapeStyle(Theme.cyan.opacity(0.14)) : AnyShapeStyle(.quaternary)))
+            .overlay(Capsule().strokeBorder(active ? AnyShapeStyle(Theme.cyan.opacity(0.4)) : AnyShapeStyle(.dsHairline), lineWidth: 0.8))
             .scaleEffect(hovered ? 1.12 : (nodeHovered ? 1.05 : 1), anchor: output ? .trailing : .leading)
             .animation(.easeOut(duration: 0.12), value: hovered)
             .animation(.easeOut(duration: 0.12), value: nodeHovered)
@@ -515,7 +515,7 @@ private struct NodeCardView: View {
         func append(_ str: Substring, variable: Bool) {
             guard !str.isEmpty else { return }
             var run = AttributedString(String(str))
-            if variable { run.foregroundColor = Theme.accent; run.font = varFont }
+            if variable { run.foregroundColor = Theme.cyan; run.font = varFont }
             attr.append(run)
         }
         while let open = rest.range(of: "{{") {
@@ -560,7 +560,7 @@ private struct NodeCardView: View {
                     // view fills the parent, so every input's hover fired across the whole card → only the
                     // topmost port ever lit up. Hangs ~6pt past the left edge so the dot sits inside.)
                     .position(x: half / 2 - 6, y: y)
-                PortDotView(filled: wired, tint: wired ? Theme.accent : .secondary,
+                PortDotView(filled: wired, tint: wired ? Theme.cyan : .secondary,
                             active: candidate || hoveredInput == port, enlarged: nodeHovered)
                     .position(x: 0, y: y).allowsHitTesting(false)
             }
@@ -575,7 +575,7 @@ private struct NodeCardView: View {
                     .onTapGesture { engine.armOutput(node: node.id, key: key) }
                     .help("Drag to an input — drag again to fan this variable out to more inputs. Or click to arm, then click a target.")
                     .position(x: w - half / 2 + 6, y: y)   // .position LAST (see input port note above)
-                PortDotView(filled: armed, tint: armed ? Theme.accent : .secondary,
+                PortDotView(filled: armed, tint: armed ? Theme.cyan : .secondary,
                             active: armed || hoveredOutput == key, enlarged: nodeHovered)
                     .position(x: w, y: y).allowsHitTesting(false)
             }
@@ -689,7 +689,7 @@ private struct PortDotView: View {
     var body: some View {
         Circle()
             .fill(filled ? AnyShapeStyle(tint) : AnyShapeStyle(.background))
-            .overlay(Circle().strokeBorder(active ? Theme.accent : tint, lineWidth: active ? 2 : 1.5))
+            .overlay(Circle().strokeBorder(active ? Theme.cyan : tint, lineWidth: active ? 2 : 1.5))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
             .scaleEffect(active ? 1.4 : (enlarged ? 1.25 : 1))
             .animation(.easeOut(duration: 0.12), value: active)
@@ -753,7 +753,7 @@ private struct GroupFrameView: View {
     /// Bottom-right grip: drag to resize the Prompt frame itself (an explicit container now, not auto-hugged).
     private var resizeGrip: some View {
         Image(systemName: "arrow.down.right")
-            .font(.dsMicro.weight(.bold)).foregroundStyle(Theme.accent.opacity(0.8))
+            .font(.dsMicro.weight(.bold)).foregroundStyle(.tertiary)
             .frame(width: 20, height: 20)
             .contentShape(Rectangle())
             .gesture(
@@ -798,7 +798,7 @@ private struct GroupFrameView: View {
     /// The group's single "out" port (right edge, mid-height) — drag to an FM's prompt port.
     private var outPort: some View {
         Circle()
-            .fill(Theme.accent.opacity(0.9))
+            .fill(Theme.cyan.opacity(0.9))
             .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
             .frame(width: NodeMetrics.portDot, height: NodeMetrics.portDot)
             .scaleEffect(armed ? 1.4 : 1)
@@ -913,7 +913,7 @@ private struct CanvasContextBar: View {
                 bar
                 if n.kind == .promptGroup { addBlockMenu }
                 iconButton("plus.square.on.square", "Duplicate (⌘D)") { engine.duplicateSelection() }
-                iconButton("link", "Auto-link variables (⌘L)", tint: Theme.accent) { engine.autoWireMatchingVars() }
+                iconButton("link", "Auto-link variables (⌘L)") { engine.autoWireMatchingVars() }
                 iconButton("trash", "Delete (⌫)", role: .destructive) { engine.deleteSelectionOrEdge() }
             } else if engine.selectedEdge != nil {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").foregroundStyle(.secondary)
@@ -922,7 +922,7 @@ private struct CanvasContextBar: View {
                 iconButton("scissors", "Delete wire (⌫)", role: .destructive) { engine.deleteSelectionOrEdge() }
             } else {
                 addNodeMenu
-                iconButton("link", "Auto-link variables (⌘L)", tint: Theme.accent) { engine.autoWireMatchingVars() }
+                iconButton("link", "Auto-link variables (⌘L)") { engine.autoWireMatchingVars() }
                 iconButton("arrow.up.left.and.arrow.down.right", "Fit to view (⌘0)") { engine.fitToView() }
             }
         }
@@ -1053,7 +1053,7 @@ private struct CanvasBatchSummaryCard: View {
             if let s = batch.lastSummary, !batch.isRunning {
                 VStack(alignment: .leading, spacing: DS.Space.sm) {
                     HStack(spacing: DS.Space.xs) {
-                        Image(systemName: "square.stack.3d.down.right.fill").font(.dsCaption).foregroundStyle(Theme.accent)
+                        Image(systemName: "square.stack.3d.down.right.fill").font(.dsCaption).foregroundStyle(.secondary)
                         Text("Batch complete").font(.dsCaption.weight(.bold))
                         Spacer(minLength: DS.Space.lg)
                         Button { batch.lastSummary = nil } label: { Image(systemName: "xmark").font(.dsMicro) }
@@ -1073,7 +1073,6 @@ private struct CanvasBatchSummaryCard: View {
                 }
                 .padding(DS.Space.md).frame(width: 340, alignment: .leading)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: DS.Radius.lg))
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg).strokeBorder(Theme.accent.opacity(0.35)))
                 .transition(.scale(scale: 0.95).combined(with: .opacity))
             }
         }

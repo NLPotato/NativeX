@@ -41,9 +41,9 @@ struct GraphListSidebar: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-            .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: DS.Radius.md))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(Theme.accent.opacity(0.35)))
-            .foregroundStyle(Theme.accent)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(.dsHairline))
+            .foregroundStyle(.primary)
             .padding(DS.Space.sm)
 
             Divider()
@@ -71,7 +71,7 @@ struct GraphListSidebar: View {
             Circle().fill(Theme.gold).frame(width: 6, height: 6)   // dirty dot — the open, unsaved buffer
         }
         .padding(.vertical, DS.Space.xxs)
-        .listRowBackground(RoundedRectangle(cornerRadius: DS.Radius.sm).fill(Theme.accent.opacity(0.16)))
+        .listRowBackground(RoundedRectangle(cornerRadius: DS.Radius.sm).fill(.quaternary))
         .contextMenu { Button("Save to storage") { engine.persist(into: context) } }
     }
 
@@ -106,7 +106,7 @@ struct GraphListSidebar: View {
         .onHover { hoveredID = $0 ? g.id : (hoveredID == g.id ? nil : hoveredID) }
         .onTapGesture { select(g) }
         .listRowBackground(RoundedRectangle(cornerRadius: DS.Radius.sm)
-            .fill(isOpen ? Theme.accent.opacity(0.16) : Color.clear))
+            .fill(isOpen ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)))
         .contextMenu {
             Button("Rename") { startRename(g) }
             Button(g.isPinned ? "Unpin" : "Pin") { g.isPinned.toggle(); try? context.save() }
