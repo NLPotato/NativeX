@@ -319,7 +319,7 @@ private struct NodeCardView: View {
     /// clamped to its floor. Available on every node, not just text blocks.
     private var resizeGrip: some View {
         Image(systemName: "arrow.down.right")
-            .font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
+            .font(.dsMicro.weight(.bold)).foregroundStyle(.tertiary)
             .frame(width: 18, height: 18)
             .contentShape(Rectangle())
             .gesture(
@@ -343,10 +343,10 @@ private struct NodeCardView: View {
     private var header: some View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: node.kind.symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.dsBody.weight(.semibold))
                 .foregroundStyle(tint)                  // each kind's hue rides on its icon
                 .frame(width: 22)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 // Line 1: the distinguishing NAME — user title, else a computed default. Double-click to rename.
                 if editingTitle {
                     TextField("", text: titleBinding)
@@ -356,7 +356,7 @@ private struct NodeCardView: View {
                 } else {
                     Text(displayTitle)
                         .font(.dsLabel).lineLimit(1)
-                        .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.9)))
+                        .foregroundStyle(.primary)
                         .onTapGesture(count: 2) { startTitleEdit() }
                 }
                 // Line 2: the STATIC node-type label ("Input", "Foundation Model", …). No third row — the
@@ -408,11 +408,11 @@ private struct NodeCardView: View {
     private func varChip(_ name: String, wired: Bool, hovered: Bool, output: Bool = false) -> some View {
         let active = wired || hovered
         return Text(name)
-            .font(.system(size: 11, weight: .medium, design: .monospaced)).lineLimit(1)
+            .font(.dsCodeMicro.weight(.medium)).lineLimit(1)
             .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
-            .padding(.horizontal, DS.Space.xs).padding(.vertical, 1)
-            .background(Capsule().fill(active ? Theme.accent.opacity(0.16) : Color.white.opacity(0.05)))
-            .overlay(Capsule().strokeBorder(active ? Theme.accent.opacity(0.4) : .white.opacity(0.08), lineWidth: 0.8))
+            .padding(.horizontal, DS.Space.xs).padding(.vertical, DS.Space.xxs)
+            .background(Capsule().fill(active ? AnyShapeStyle(Theme.accent.opacity(0.16)) : AnyShapeStyle(.quaternary)))
+            .overlay(Capsule().strokeBorder(active ? AnyShapeStyle(Theme.accent.opacity(0.4)) : AnyShapeStyle(.dsHairline), lineWidth: 0.8))
             .scaleEffect(hovered ? 1.12 : (nodeHovered ? 1.05 : 1), anchor: output ? .trailing : .leading)
             .animation(.easeOut(duration: 0.12), value: hovered)
             .animation(.easeOut(duration: 0.12), value: nodeHovered)
@@ -423,7 +423,7 @@ private struct NodeCardView: View {
     /// from the literal prompt prose (feedback #6).
     private func promptBand(_ text: String) -> some View {
         Text(highlightedPrompt(text))
-            .font(.dsMicro).foregroundStyle(.primary.opacity(0.85))   // brighter prose; {{var}} runs override with accent
+            .font(.dsMicro).foregroundStyle(.primary)   // bright prose; {{var}} runs override with accent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, DS.Space.md).padding(.top, DS.Space.xs).padding(.bottom, DS.Space.sm)
             // Bottom corners match the card so the recess doesn't poke past the rounded edge.
@@ -438,7 +438,7 @@ private struct NodeCardView: View {
     private func highlightedPrompt(_ s: String) -> AttributedString {
         var attr = AttributedString()
         var rest = Substring(s)
-        let varFont = Font.system(size: 12, weight: .semibold, design: .monospaced)
+        let varFont = Font.dsCodeMicro.weight(.semibold)
         func append(_ str: Substring, variable: Bool) {
             guard !str.isEmpty else { return }
             var run = AttributedString(String(str))
@@ -513,9 +513,9 @@ private struct NodeCardView: View {
     private var borderColor: Color {
         if selected { return tint }                      // selected border carries the node's own hue
         switch run?.status {
-        case .error: return .red.opacity(0.7)
-        case .none:  return issues.isEmpty ? .white.opacity(0.12) : Theme.gold.opacity(0.65)  // amber = not ready
-        default:     return .white.opacity(0.12)         // success is shown by the status dot, not green chrome
+        case .error: return Color.dsDanger.opacity(0.7)
+        case .none:  return issues.isEmpty ? .dsHairline : Theme.gold.opacity(0.65)  // amber = not ready
+        default:     return .dsHairline                  // success is shown by the status dot, not green chrome
         }
     }
 
@@ -675,7 +675,7 @@ private struct GroupFrameView: View {
     /// Bottom-right grip: drag to resize the Prompt frame itself (an explicit container now, not auto-hugged).
     private var resizeGrip: some View {
         Image(systemName: "arrow.down.right")
-            .font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.accent.opacity(0.8))
+            .font(.dsMicro.weight(.bold)).foregroundStyle(Theme.accent.opacity(0.8))
             .frame(width: 20, height: 20)
             .contentShape(Rectangle())
             .gesture(
@@ -850,7 +850,7 @@ private struct CanvasContextBar: View {
         .tint(.primary)
     }
 
-    private var bar: some View { Divider().frame(height: 16).padding(.horizontal, 2) }
+    private var bar: some View { Divider().frame(height: 16).padding(.horizontal, DS.Space.xxs) }
 
     private func iconButton(_ symbol: String, _ help: String, tint: Color = .primary,
                             role: ButtonRole? = nil, _ action: @escaping () -> Void) -> some View {
@@ -914,7 +914,7 @@ private struct CanvasRunControl: View {
                 if engine.isRunning {
                     ProgressView().controlSize(.small).tint(.black)
                 } else {
-                    Image(systemName: "play.fill").font(.system(size: 12, weight: .bold))
+                    Image(systemName: "play.fill").font(.dsMicro.weight(.bold))
                 }
                 Text(engine.isRunning ? "Running…" : "Run").font(.dsCaption.weight(.bold))
             }
@@ -946,7 +946,7 @@ private struct CanvasRunControl: View {
         } else {
             Button { onRunDataset() } label: {
                 HStack(spacing: DS.Space.xs) {
-                    Image(systemName: "square.stack.3d.down.right.fill").font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "square.stack.3d.down.right.fill").font(.dsMicro.weight(.semibold))
                     Text("Run dataset").font(.dsCaption.weight(.medium))
                 }
                 .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
@@ -1003,7 +1003,7 @@ private struct CanvasBatchSummaryCard: View {
     }
 
     private func stat(_ value: String, _ label: String, tint: Color = .primary) -> some View {
-        VStack(spacing: 1) {
+        VStack(spacing: DS.Space.xxs) {
             Text(value).font(.dsCaption.weight(.bold)).foregroundStyle(tint).monospacedDigit()
             Text(label).font(.dsMicro).foregroundStyle(.secondary)
         }

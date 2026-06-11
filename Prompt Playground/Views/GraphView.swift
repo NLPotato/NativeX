@@ -104,7 +104,7 @@ struct GraphView: View {
             .menuStyle(.borderlessButton).fixedSize()
 
             if engine.isDirty {
-                Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(Theme.gold)
+                Circle().fill(Theme.gold).frame(width: 6, height: 6)
                     .help("Unsaved changes")
             }
             Button { save() } label: { Label("Save", systemImage: "tray.and.arrow.up") }
@@ -136,7 +136,7 @@ struct GraphView: View {
         } else {
             VStack(spacing: DS.Space.md) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 30)).foregroundStyle(.tertiary)
+                    .font(.dsDisplay).foregroundStyle(.tertiary)
                 Text("Select a node to edit it").font(.dsBody).foregroundStyle(.secondary)
                 Text("Drag from an output port (right) to an input port (left) to wire nodes. An FM node needs a prompt wired into its prompt port.")
                     .font(.dsCaption).foregroundStyle(.tertiary).multilineTextAlignment(.center)

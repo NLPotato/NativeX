@@ -260,11 +260,7 @@ struct DatasetsView: View {
         case .roleplay: color = .dsInfo
         case .custom:  color = .dsWarning
         }
-        return Text(task.label)
-            .font(.dsMicro).fontWeight(.medium)
-            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
-            .background(color.opacity(0.22), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.5))
+        return Text(task.label).dsBadge(color)
     }
 }
 

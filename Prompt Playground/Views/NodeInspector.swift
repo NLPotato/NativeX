@@ -64,7 +64,7 @@ struct NodeInspector: View {
     private func header(_ node: Binding<GraphNode>) -> some View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: node.wrappedValue.kind.symbol).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 TextField("Title", text: node.title).dsTextField()
                 Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
             }
@@ -603,7 +603,7 @@ private struct FMEditor: View {
             }
         } else {
             VStack(spacing: DS.Space.sm) {
-                Image(systemName: "brain").font(.system(size: 28)).foregroundStyle(.tertiary)
+                Image(systemName: "brain").font(.dsDisplay).foregroundStyle(.tertiary)
                 Text("Run the graph to see the model’s output here.")
                     .font(.dsCaption).foregroundStyle(.secondary)
             }
@@ -669,7 +669,7 @@ private struct PortWiringRow: View {
         let producers = engine.producers(of: port, excluding: nodeID)
         let current = engine.graph.incoming(nodeID).first { $0.inputPort == port }
         let value = current.flatMap { engine.runs[$0.fromNodeID]?.outputs[$0.outputKey] }
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
             HStack(spacing: DS.Space.xs) {
                 tag(port)
                 Image(systemName: "arrow.left").font(.dsMicro).foregroundStyle(.tertiary)
@@ -709,7 +709,7 @@ private struct PortWiringRow: View {
 
     private func tag(_ p: String) -> some View {
         Text(p).font(.dsCode).foregroundStyle(.primary)
-            .padding(.horizontal, DS.Space.sm).padding(.vertical, 1)
+            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
             .background(.quaternary, in: Capsule())
     }
 }

@@ -63,14 +63,14 @@ struct GraphListSidebar: View {
     private var unsavedDraftRow: some View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: "circle.dashed").font(.dsCaption).foregroundStyle(.secondary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 Text("Unsaved draft").font(.dsLabel).lineLimit(1)
                 Text("Not saved to storage").font(.dsMicro).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Circle().fill(Theme.gold).frame(width: 6, height: 6)   // dirty dot — the open, unsaved buffer
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DS.Space.xxs)
         .listRowBackground(RoundedRectangle(cornerRadius: DS.Radius.sm).fill(Theme.accent.opacity(0.16)))
         .contextMenu { Button("Save to storage") { engine.persist(into: context) } }
     }
@@ -87,7 +87,7 @@ struct GraphListSidebar: View {
                     .onSubmit { renamingID = nil }
                     .onChange(of: renameFocused) { _, focused in if !focused { renamingID = nil } }
             } else {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
                     Text(g.name).font(.dsLabel).lineLimit(1)
                     Text(subtitle(g)).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -101,7 +101,7 @@ struct GraphListSidebar: View {
                     .buttonStyle(.plain).font(.dsCaption).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DS.Space.xxs)
         .contentShape(Rectangle())
         .onHover { hoveredID = $0 ? g.id : (hoveredID == g.id ? nil : hoveredID) }
         .onTapGesture { select(g) }

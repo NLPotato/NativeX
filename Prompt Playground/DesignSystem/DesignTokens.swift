@@ -41,6 +41,8 @@ extension Font {
     static let dsCaption = Font.system(size: 13, weight: .regular)
     static let dsMicro   = Font.system(size: 12, weight: .regular)
     static let dsCode    = Font.system(size: 14, weight: .regular, design: .monospaced)
+    /// Mono at the micro (12pt) floor — port variable chips, API name chips, inline code badges.
+    static let dsCodeMicro = Font.system(size: 12, weight: .regular, design: .monospaced)
 }
 
 // MARK: - Semantic state colors (primitives live in Theme.swift)
@@ -53,6 +55,8 @@ extension ShapeStyle where Self == Color {
     static var dsDanger:  Color { .red }
     static var dsSuccess: Color { Theme.accent }
     static var dsInfo:    Color { Theme.cyan }   // neutral category accent (e.g. task badges)
+    /// The ONE neutral hairline border (chips, fields, unselected node cards). One role, one value.
+    static var dsHairline: Color { .white.opacity(0.10) }
 }
 
 // MARK: - Component chrome
@@ -65,7 +69,7 @@ extension View {
             .font(.dsBody)
             .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
     }
 
     /// Multi-line editor chrome — same surface, height in line multiples. Caller sets the font
@@ -75,12 +79,23 @@ extension View {
             .padding(DS.Space.sm)
             .frame(minHeight: CGFloat(lines) * DS.lineHeight + DS.Space.sm * 2)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
+    }
+
+    /// The one chip/badge: `.dsMicro` text in a tinted capsule (§4.4). Status tags, task badges,
+    /// portability chips — every small capsule label routes through here.
+    func dsBadge(_ color: Color) -> some View {
+        font(.dsMicro.weight(.medium))
+            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
+            .background(color.opacity(0.22), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.5))
+            .foregroundStyle(color)
     }
 
     /// Card surface. `raised` for "your"/selected/final blocks. Depth ≥ 1 → use `.dsFlat()`.
-    func dsCard(raised: Bool = false) -> some View {
-        let shape = RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+    /// `radius` defaults to md; floating top-level panels pass `DS.Radius.lg` (§3.3).
+    func dsCard(raised: Bool = false, radius: CGFloat = DS.Radius.md) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return padding(DS.Space.lg).background {
             shape.fill(.ultraThinMaterial)
                 .overlay { if raised { shape.fill(Theme.accent.opacity(0.14)) } }

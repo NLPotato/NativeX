@@ -19,18 +19,18 @@ struct CanvasResultCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.xs) {
-                Image(systemName: "sparkles").font(.dsMicro).foregroundStyle(.black.opacity(0.6))
-                Text("Result").font(.dsCaption.weight(.bold)).foregroundStyle(.black.opacity(0.8))
+                Image(systemName: "sparkles").font(.dsMicro).foregroundStyle(.secondary)
+                Text("Result").font(.dsCaption.weight(.bold)).foregroundStyle(.primary)
                 Spacer(minLength: DS.Space.md)
                 Button { copy() } label: { Image(systemName: "doc.on.doc") }
-                    .buttonStyle(.plain).foregroundStyle(.black.opacity(0.55)).help("Copy")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Copy")
                 Button { engine.resultCardDismissed = true } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).foregroundStyle(.black.opacity(0.55)).help("Dismiss")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Dismiss")
             }
             .font(.dsMicro)
-            Divider().overlay(Color.black.opacity(0.1))
+            Divider()
             ScrollView {
-                Text(text).font(.dsBody).foregroundStyle(.black)
+                Text(text).font(.dsBody).foregroundStyle(.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -38,6 +38,9 @@ struct CanvasResultCard: View {
         }
         .padding(DS.Space.md)
         .frame(width: 320, alignment: .leading)
+        // A white "printed artifact" — light scheme so the semantic text roles resolve dark-on-light
+        // (no hand-mixed black opacities, per design.md §3.4).
+        .environment(\.colorScheme, .light)
         .background(Color.white, in: RoundedRectangle(cornerRadius: DS.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).strokeBorder(.black.opacity(0.12)))
         .shadow(color: .black.opacity(0.35), radius: 16, y: 6)   // floats above the board as a distinct artifact

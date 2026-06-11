@@ -105,7 +105,7 @@ struct GenConfigControls: View {
     }
 
     private func infoRow(_ name: String, _ desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DS.Space.xxs) {
             Text(name).font(.dsCaption).fontWeight(.semibold)
             Text(desc).font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

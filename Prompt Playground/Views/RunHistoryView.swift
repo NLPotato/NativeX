@@ -60,7 +60,7 @@ struct RunHistoryView: View {
 
     private var emptyList: some View {
         VStack(spacing: DS.Space.sm) {
-            Image(systemName: "clock.arrow.circlepath").font(.system(size: 26)).foregroundStyle(.tertiary)
+            Image(systemName: "clock.arrow.circlepath").font(.dsDisplay).foregroundStyle(.tertiary)
             Text("No runs yet").font(.dsBody).foregroundStyle(.secondary)
             Text("Run a graph to log it here.").font(.dsCaption).foregroundStyle(.tertiary)
         }
@@ -83,7 +83,7 @@ struct RunHistoryView: View {
             }
         } else {
             VStack(spacing: DS.Space.md) {
-                Image(systemName: "list.bullet.rectangle.portrait").font(.system(size: 30)).foregroundStyle(.tertiary)
+                Image(systemName: "list.bullet.rectangle.portrait").font(.dsDisplay).foregroundStyle(.tertiary)
                 Text("Select a run to inspect it").font(.dsBody).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,7 +111,7 @@ private struct TraceRow: View {
     let trace: TraceModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
             HStack(spacing: DS.Space.sm) {
                 StatusDot(ok: trace.status == "ok")
                 Text(trace.sourceName).font(.dsLabel).lineLimit(1)
@@ -128,7 +128,7 @@ private struct TraceRow: View {
             }
             .font(.dsMicro).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DS.Space.xxs)
     }
 }
 
@@ -158,7 +158,7 @@ private struct TraceHeader: View {
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DS.Space.xxs) {
             Text(label.uppercased()).font(.dsMicro).foregroundStyle(.tertiary)
             Text(value).font(.dsCaption.monospacedDigit())
         }
@@ -251,9 +251,6 @@ private struct TypeChip: View {
     private var label: String { type == "llm" ? "LLM" : type == "api" ? "API" : "HOOK" }
     private var color: Color { type == "llm" ? .dsAccent : .secondary }
     var body: some View {
-        Text(label).font(.dsMicro.weight(.semibold))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.18), in: Capsule())
-            .foregroundStyle(color)
+        Text(label).dsBadge(color)
     }
 }

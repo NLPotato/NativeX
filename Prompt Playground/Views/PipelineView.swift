@@ -441,19 +441,12 @@ struct PipelineView: View {
     }
 
     private func hookPortabilityBadge(_ p: Portability) -> some View {
-        Text(p.label).font(.dsMicro)
-            .padding(.horizontal, DS.Space.xs).padding(.vertical, 1)
-            .background((p.isPortable ? Color.dsAccent : Color.dsWarning).opacity(0.18), in: Capsule())
-            .foregroundStyle(p.isPortable ? Color.dsAccent : Color.dsWarning)
+        Text(p.label).dsBadge(p.isPortable ? .dsAccent : .dsWarning)
     }
 
     private func statusTag(_ status: String) -> some View {
         let color: Color = status == "done" ? .dsSuccess : status == "cancelled" ? .dsWarning : .dsInfo
-        return Text(status)
-            .font(.dsMicro).fontWeight(.medium)
-            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
-            .background(color.opacity(0.22), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.45), lineWidth: 0.5))
+        return Text(status).dsBadge(color)
     }
 }
 
@@ -675,10 +668,6 @@ private struct RunRow: View {
 
     /// Small capsule naming the failure mode (guardrail / unsupportedLanguage / decoding / …).
     private func errorTag(_ type: String) -> some View {
-        Text(type)
-            .font(.dsMicro).fontWeight(.medium)
-            .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
-            .background(Color.dsDanger.opacity(0.18), in: Capsule())
-            .foregroundStyle(Color.dsDanger)
+        Text(type).dsBadge(.dsDanger)
     }
 }
