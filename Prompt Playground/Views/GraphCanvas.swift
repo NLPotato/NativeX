@@ -397,9 +397,16 @@ private struct NodeCardView: View {
                         .foregroundStyle(.primary)
                         .onTapGesture(count: 2) { startTitleEdit() }
                 }
-                // Line 2: the STATIC node-type label ("Input", "Foundation Model", …). No third row — the
-                // node body band already previews content, and the result card shows the run output.
-                Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary).lineLimit(1)
+                // Line 2: the STATIC node-type label + the official Apple API name as a quiet chip (§6.1).
+                // No third row — the body band previews content; the result card shows the run output.
+                HStack(spacing: DS.Space.xs) {
+                    Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary)
+                    if let api = node.apiName {
+                        Text("·").font(.dsMicro).foregroundStyle(.tertiary)
+                        Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    }
+                }
+                .lineLimit(1)
             }
             Spacer(minLength: 0)
             statusDot
@@ -746,6 +753,9 @@ private struct GroupFrameView: View {
                 .font(.dsCaption).foregroundStyle(dropping ? Theme.accent : .secondary)
             Text(group.title.isEmpty ? "Prompt" : group.title).font(.dsLabel).lineLimit(1)
             Text("\(engine.members(of: group.id).count)").font(.dsMicro).foregroundStyle(.tertiary).monospacedDigit()
+            if let api = group.apiName {   // §6.1 — the request this group assembles
+                Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).lineLimit(1)
+            }
             if dropping { Text("add").font(.dsMicro.weight(.semibold)).foregroundStyle(Theme.accent) }
             if !dropping, !issues.isEmpty {
                 Image(systemName: "exclamationmark.triangle.fill").font(.dsMicro).foregroundStyle(.dsWarning)

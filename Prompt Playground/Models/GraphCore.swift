@@ -201,6 +201,35 @@ struct GraphNode: Codable, Identifiable, Equatable, Sendable {
 }
 
 extension GraphNode {
+    /// The official Apple API this node maps to (design.md §6.1) — surfaced as a quiet secondary chip
+    /// next to the friendly label (UX-First: teach the real API while you prototype). `nil` for plain
+    /// data sources (Input) that have no backing API. Op-dependent for native-API/hook nodes.
+    var apiName: String? {
+        switch kind {
+        case .promptGroup: return "LanguageModelSession"   // the request it assembles
+        case .instruction: return "Instructions"
+        case .fewshot:     return "Transcript"
+        case .history:     return "Transcript.Entry"
+        case .current:     return "Prompt"
+        case .guided:      return "DynamicGenerationSchema"
+        case .tool:        return "Tool"
+        case .input:       return nil
+        case .fm:          return "LanguageModelSession"
+        case .compare:     return "ComparePayload"
+        case .nativeAPI, .hook:
+            switch hook?.op {
+            case .tokenizeWords, .sentenceSplit: return "NLTokenizer"
+            case .enrichGloss:    return "NLTagger"
+            case .detectLanguage: return "NLLanguageRecognizer"
+            case .regexExtract, .regexReplace: return "Regex"
+            case .jsonExtract:    return "JSONSerialization"
+            case .textTransform:  return "Foundation"
+            case .script:         return "/bin/zsh"
+            case nil:             return nil
+            }
+        }
+    }
+
     static func promptGroup(title: String = "Prompt", x: Double = 0, y: Double = 0) -> GraphNode {
         GraphNode(kind: .promptGroup, x: x, y: y, title: title, group: PromptGroupPayload())
     }
