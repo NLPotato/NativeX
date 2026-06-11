@@ -3,8 +3,9 @@
 //  Prompt Playground
 //
 //  Shared LLMOps primitives used across the pipeline: task kinds, a Codable mirror of
-//  GenerationOptions, on-device token ESTIMATION (Apple exposes no token API — see note),
-//  and NaturalLanguage-based language detection / tokenization for the objective metrics.
+//  GenerationOptions, on-device token estimation (heuristic fallback — see the note at
+//  TokenEstimator), and NaturalLanguage-based language detection / tokenization for the
+//  objective metrics.
 //
 //  FoundationModels API facts below were verified against the installed SDK
 //  (…/FoundationModels.swiftmodule/arm64e-apple-macos.swiftinterface), not assumed.
@@ -204,10 +205,19 @@ struct GenConfig: Codable, Equatable, Hashable, Sendable {
 }
 
 // MARK: - Token estimation
-// FoundationModels exposes NO token-count API. Verified: the ONLY token-related symbols in
-// the framework interface are GenerationOptions.maximumResponseTokens (an input cap) and
-// LanguageModelSession.GenerationError.exceededContextWindowSize. There is no tokenCount(for:)
-// and Response carries no usage. So all token figures here are ESTIMATES, labelled as such.
+// macOS 26.4 added native token introspection: `model.tokenCount(for:)` before a call and
+// `response.usage` (input / output / cached / reasoning counts) after one — see docs/prd.md §6.3
+// and docs/reference/foundation-models.md. Those are the preferred source of truth on 26.4+.
+//
+// HOWEVER: this project currently builds with the Xcode 26.2 SDK, whose FoundationModels
+// interface contains NEITHER symbol (verified 2026-06: zero `tokenCount`/`usage` matches in
+// …/FoundationModels.swiftmodule/arm64e-apple-macos.swiftinterface). The native path cannot
+// compile until the 26.4 SDK ships in Xcode, so every figure here is a heuristic ESTIMATE,
+// labelled as such in the UI.
+//
+// TODO(Xcode 26.4 SDK): behind `#available(macOS 26.4, *)`, route `estimate(_:)` through
+// `model.tokenCount(for:)` and surface `response.usage.*` in GraphExecutor's trace steps
+// (ExecStep.promptTokens/outputTokens); keep this heuristic as the 26.0–26.3 fallback.
 //
 // Heuristic: dense scripts (CJK ideographs, Hangul, Kana) ≈ 1 token per character; everything
 // else ≈ 1 token per 4 characters. Deliberately slightly conservative so headroom warnings

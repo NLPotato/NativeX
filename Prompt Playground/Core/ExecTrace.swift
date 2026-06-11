@@ -40,7 +40,7 @@ struct ExecStep: Codable, Sendable, Identifiable {
     var schemaName: String? = nil       // guided-generation schema, if any
     var output: String? = nil
     var configLabel: String? = nil      // sampling summary (GenConfig.label)
-    var promptTokens: Int? = nil        // estimated — Apple exposes no token API
+    var promptTokens: Int? = nil        // heuristic estimate (native response.usage pending the 26.4 SDK — see TokenEstimator)
     var outputTokens: Int? = nil
     var contextTokens: Int? = nil
 
