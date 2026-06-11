@@ -75,7 +75,7 @@ struct NodeInspector: View {
                 TextField("Title", text: node.title).dsTextField()
                 HStack(spacing: DS.Space.sm) {
                     Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
-                    PortabilityBadge(portability: inspectorPortability, showLabel: true)   // §6.2
+                    PortabilityBadge(portability: inspectorPortability, showLabel: true, chip: true)   // §6.2
                 }
                 .lineLimit(1)
                 if let api = node.wrappedValue.apiName {   // official API name, full width — never truncated (§6.1)
@@ -133,10 +133,17 @@ private struct PromptGroupEditor: View {
                     ForEach(Array(members.enumerated()), id: \.element.id) { idx, m in
                         HStack(spacing: DS.Space.sm) {
                             Text("\(idx + 1)").font(.dsMicro.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 14, alignment: .trailing)
-                            Image(systemName: m.kind.symbol).font(.dsCaption).foregroundStyle(.secondary).frame(width: 18)
+                            Image(systemName: m.kind.symbol).font(.dsCaption).foregroundStyle(kindTint(m.kind)).frame(width: 18)
                             Text(m.kind.label).font(.dsCaption)
                             Spacer(minLength: 0)
                             Text(m.title).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(1)
+                            // Reorder = swap assembly order; the canvas stack re-snaps to match.
+                            Button { engine.moveMember(m.id, up: true) } label: { Image(systemName: "chevron.up") }
+                                .buttonStyle(.plain).font(.dsMicro).foregroundStyle(idx == 0 ? .quaternary : .secondary)
+                                .disabled(idx == 0).help("Move earlier in the prompt")
+                            Button { engine.moveMember(m.id, up: false) } label: { Image(systemName: "chevron.down") }
+                                .buttonStyle(.plain).font(.dsMicro).foregroundStyle(idx == members.count - 1 ? .quaternary : .secondary)
+                                .disabled(idx == members.count - 1).help("Move later in the prompt")
                         }
                     }
                 }

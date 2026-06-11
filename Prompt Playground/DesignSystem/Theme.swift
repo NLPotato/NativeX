@@ -20,6 +20,13 @@ enum Theme {
     /// under white control labels. Keep this in sync with Assets.xcassets/AccentColor.
     static let accent = Color(.displayP3, red: 0.457, green: 0.985, blue: 0.298) // #0FFF50
 
+    // Prompt-block sub-hues (design.md §5.2): quiet-but-separate identities WITHIN the prompt family,
+    // so a stacked Prompt group reads as distinct block kinds at a glance. Desaturated neighbors of the
+    // cyan family anchor — never as loud as accent, never used for variables/wiring (that stays cyan).
+    static let teal   = Color(.displayP3, red: 0.380, green: 0.870, blue: 0.760) // few-shot
+    static let violet = Color(.displayP3, red: 0.730, green: 0.640, blue: 1.000) // history
+    static let blue   = Color(.displayP3, red: 0.470, green: 0.730, blue: 1.000) // current turn
+
     /// Soft charcoal backdrop — dark enough that the neon-green accent pops, but not pure black.
     /// A subtle green→cool shift across the gradient ties it back to the icon's hues.
     static let backdrop = LinearGradient(

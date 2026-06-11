@@ -46,8 +46,9 @@ See `docs/prd.md §4` for the full rationale.
 ### 2.3 60-30-10 color rule
 
 - **60% — neutral base.** `Theme.backdrop`, `.secondary`, `.tertiary`, system backgrounds. The dominant tone of every surface.
-- **30% — category color.** One color per node family (cyan for prompt blocks, gold for macOS-only, pink for Compare). Applied as a tinted border, icon color, or subtle fill. Never a solid color wash.
-- **10% — accent (`Theme.accent`, neon green).** Reserved strictly for: the primary Run button, active/selected states, FM node radiance, and key interactive controls. If a surface "feels too green," it is using more than 10%.
+- **30% — category color.** One color per node family (cyan family for prompt blocks, gold for macOS-only, pink for Compare). Prompt blocks differentiate further with quiet-but-separate hues inside the family (see §5.2). Applied as a tinted border, icon color, or subtle fill. Never a solid color wash.
+- **10% — accent (`Theme.accent`, neon green).** Reserved strictly for: the primary Run button, active/selected states, FM node radiance, and run success. An **idle FM node is neutral** — no green border or icon; green appears on it only while running (radiance) or selected. If a surface "feels too green," it is using more than 10%.
+- **Variables & wiring are cyan, not accent.** Port chips, `{{var}}` highlights, port dots, pending wires, and the group out-port all use `Theme.cyan` (the prompt-data hue). Sidebar selection and navigation chrome stay neutral (`.quaternary`). Accent never marks "wired/configured" — only "running/selected/succeeded/primary action".
 
 ---
 
@@ -66,7 +67,8 @@ All font tokens live in `DesignTokens.swift`. Use them exclusively.
 | `.dsLabel` | 14 / medium | Field labels, control labels, node primary labels |
 | `.dsCaption` | 13 / regular | Help text, secondary metadata — **the readable floor** |
 | `.dsMicro` | 12 / regular | Incidental chrome only: badges, timestamps, counts |
-| `.dsCode` | 14 / mono | API name chips, JSON, code blocks |
+| `.dsCode` | 14 / mono | JSON, code blocks, inspector API names |
+| `.dsCodeMicro` | 12 / mono | Port variable chips, canvas API name chips — mono at the micro floor |
 
 Color pairs with type via §3.4 (e.g. `.dsLabel` → `.secondary`, `.dsCaption` help → `.tertiary`).
 
@@ -179,6 +181,7 @@ VStack(alignment: .leading, spacing: DS.Space.sm)
 
 - `.dsCard(raised: Bool)` — frosted `.ultraThinMaterial` + accent border. `raised: true` adds accent tint fill and brighter border for selected/active state.
 - `.dsFlat()` — flat nested surface (no frost, no shadow). `.quaternary` background + 3pt left accent stripe. Use at depth ≥ 1 inside a card.
+- `.dsGroup()` — quiet grouping container (white@0.04 fill + hairline, radius `md`, pad `md`). Clusters related rows/blocks into one visual unit (inspector sections, Run History stages inside a step card). No frost — nests safely anywhere (§3.5).
 
 ### 4.3 Section divider — `DSSectionHeader`
 
@@ -190,7 +193,7 @@ VStack(alignment: .leading, spacing: DS.Space.sm)
 |---|---|---|
 | Default button / picker / toggle row | 28pt (`DS.Size.control`) | `DS.Space.sm` gaps |
 | Primary action (Run button) | 32pt (`DS.Size.controlLarge`) | Full-width, prominent, `dsAccent` fill |
-| Chip / badge | Intrinsic | `.dsMicro`, pad `xxs`/`sm`, `DS.Radius.sm`, `Capsule()` for pills |
+| Chip / badge | Intrinsic | `.dsBadge(color)` — `.dsMicro` medium in a tinted capsule (`color@0.22` fill, `color@0.45` 0.5px stroke, pad `sm`/`xxs`). One modifier for every status/task/portability tag. |
 
 ### 4.5 Glass chrome components
 
@@ -220,9 +223,9 @@ Category color = the 30% budget. Applied as a tinted border, icon color, or acce
 
 | Node | Family | Category color | Body surface |
 |---|---|---|---|
-| `Foundation Model` | Execution | `dsAccent` (green) border + radiance while running | Glass header, opaque body |
+| `Foundation Model` | Execution | Neutral at idle (hairline border, secondary icon); `dsAccent` radiance while running, accent border/glow when selected | Glass header, opaque body |
 | `Prompt Group` | Container | `dsAccent` @ 40% tint on selected state | Opaque `.dsCard()` |
-| `Instruction`, `Few-shot`, `History`, `Current Turn` | Prompt block | `dsInfo` (cyan) left stripe | `.dsFlat()` nested inside Prompt Group |
+| `Instruction`, `Few-shot`, `History`, `Current Turn` | Prompt block | Quiet-but-separate hues in the cyan family — Instruction `Theme.cyan`, Few-shot `Theme.teal`, History `Theme.violet`, Current Turn `Theme.blue` — as left stripe + icon + header wash | `.dsFlat()` nested inside Prompt Group |
 | `Guided Output`, `Tool` | Schema / tool block | `dsInfo` @ 60% | `.dsFlat()` |
 | `Input` | Data source | Neutral — no category color | Glass header chip |
 | `Native API` | Utility | `dsInfo` portability badge only | Glass header chip |
@@ -243,7 +246,7 @@ Never apply to other node types. This is the single use of `Theme.lime` in the e
 
 ### 6.1 Friendly label + official Apple API name
 
-Every node exposes two labels: a friendly primary label and the underlying Apple API name. The friendly label is `.dsLabel`; the API name is `.dsCode` at `.dsCaption` size in a quiet neutral chip (`.tertiary` foreground, no border).
+Every node exposes two labels: a friendly primary label and the underlying Apple API name. The friendly label is `.dsLabel`; the API name is a quiet neutral chip (`.tertiary` foreground, no border) — `.dsCodeMicro` on the compact canvas header (with `layoutPriority` so it survives the squeeze over the kind label), `.dsCode` on its own full-width row in the inspector header (never truncated).
 
 ```
 Node canvas header:   Foundation Model  ·  LanguageModelSession
@@ -255,28 +258,37 @@ Full mapping:
 | Node | Friendly label | Apple API name |
 |---|---|---|
 | Foundation Model | Foundation Model | `LanguageModelSession` |
+| Instruction block | Instruction | `Instructions` |
+| Few-shot block | Few-shot | `Transcript` |
+| Current turn block | Current turn | `Prompt` |
 | Guided Output block | Guided Output | `DynamicGenerationSchema` |
 | History block | History | `Transcript.Entry` |
-| Hook (Script) | Hook · Script | `/bin/zsh` |
-| Native API — tokenize | Tokenize Words | `NLTokenizer` |
+| Tool block | Tool | `Tool` |
+| Hook — script | Hook · Script | `/bin/zsh` |
+| Hook — regex extract/replace | Regex … | `Regex` |
+| Hook — JSON extract | JSON extract | `JSONSerialization` |
+| Hook — text transform | Text transform | `Foundation` |
+| Native API — tokenize / split sentences | Tokenize Words / Split sentences | `NLTokenizer` |
+| Native API — enrich tokens | Enrich tokens | `NLTagger` |
 | Native API — detect language | Detect Language | `NLLanguageRecognizer` |
-| Native API — evaluate | Evaluate | `ModelJudgeEvaluator` |
-| Native API — OCR | OCR | `OCRTool` |
-| Native API — barcode | Barcode | `BarcodeReaderTool` |
-| Native API — spotlight | Spotlight Search | Spotlight |
+| Native API — evaluate *(planned)* | Evaluate | `ModelJudgeEvaluator` |
+| Native API — OCR *(planned)* | OCR | `OCRTool` |
+| Native API — barcode *(planned)* | Barcode | `BarcodeReaderTool` |
+| Native API — spotlight *(planned)* | Spotlight Search | Spotlight |
 | Prompt Group | Prompt Group | `LanguageModelSession` (the request it builds) |
 | Compare | Compare | `ComparePayload` |
+| Input | Input | — (plain data source, no chip) |
 
 ### 6.2 Portability badges
 
-Every node header carries a portability badge. Placement: trailing end of the header chip and below the title in the inspector.
+Portability lives in the **inspector only** — a labeled `.dsBadge` capsule below the title. Canvas node headers stay minimal (title · kind · API name · status dot); per-node platform icons on the board read as noise at graph scale.
 
 | Badge | SF Symbol | Color | Meaning |
 |---|---|---|---|
 | iOS · macOS | `laptopcomputer.and.iphone` | `dsInfo` (cyan) | Runs sandboxed on both platforms |
 | macOS only | `laptopcomputer` | `dsWarning` (gold) | Requires sandbox off; client apps cannot use this |
 
-Badge size: SF Symbol at `.caption` scale alongside `.dsMicro` text. For a node that contains children of mixed tiers (e.g. a Prompt Group with a Script Hook child wired to it), the group badge shows the most restrictive tier of its subgraph.
+For a node that contains children of mixed tiers (e.g. a Prompt Group with a Script Hook child wired to it), the group badge shows the most restrictive tier of its subgraph.
 
 ### 6.3 Canvas execution feedback
 
@@ -288,6 +300,10 @@ All execution feedback lives on the canvas. No navigation to Run History is requ
 | FM node generation complete | Radiance fades out | `.runningRadiance(active: false)` → `.easeInOut(0.45)` |
 | Run error | Top-right toast (tap to dismiss) | Glass rounded rect, `exclamationmark.circle` SF Symbol in `dsDanger`, error message `.dsCaption` |
 | Single-run result | Inline card beneath the FM node | Opaque `.dsCard()`, output text `.dsBody`, token count `.dsMicro .tertiary` |
+
+### 6.4 Prompt group = managed stack
+
+A Prompt group's members are auto-laid-out as one tidy left-aligned column (`GraphEngine.autoLayoutGroup`): blocks stack top→bottom in assembly order, the frame shrink-wraps the stack (16pt pad, 12pt gap). Dragging a block above/below a sibling re-orders the prompt — the stack snaps tidy on drop; the inspector's block list offers the same via up/down arrows. Free-form placement inside a group is intentionally NOT preserved: position **is** order, so the layout always shows the truth.
 
 ---
 
@@ -338,16 +354,18 @@ DS.lineHeight    // 22pt — used by dsEditor(lines:)
 
 // Fonts (extension on Font)
 .dsDisplay / .dsTitle / .dsHeading / .dsBody
-.dsLabel / .dsCaption / .dsMicro / .dsCode
+.dsLabel / .dsCaption / .dsMicro / .dsCode / .dsCodeMicro
 
 // Semantic colors (extension on ShapeStyle where Self == Color)
-.dsAccent / .dsWarning / .dsDanger / .dsSuccess / .dsInfo
+.dsAccent / .dsWarning / .dsDanger / .dsSuccess / .dsInfo / .dsHairline
 
 // View modifiers
 .dsTextField()
 .dsEditor(lines: Int)
-.dsCard(raised: Bool)
+.dsCard(raised: Bool, radius: CGFloat = DS.Radius.md)
 .dsFlat()
+.dsGroup()
+.dsBadge(_ color: Color)
 .runningRadiance(active: Bool, corner: CGFloat)
 
 // Components
@@ -362,18 +380,23 @@ DSSectionHeader(_ title: String)
 Pre-build run-script or `git grep` check. Fails on raw visual literals in view files:
 
 ```sh
-git grep -nE '\.font\(\.(caption2?|footnote|callout|body)\)|spacing: ?[0-9]|\.padding\([^)]*[0-9]|cornerRadius: ?[0-9]|\.opacity\(0\.[0-9]' \
+git grep -nE '\.font\(\.(largeTitle|title2?|title3|headline|subheadline|body|callout|footnote|caption2?)\)|\.system\(size:|spacing: ?[1-9]|\.padding\([^)]*[0-9]|cornerRadius: ?[0-9]|\.(primary|secondary|tertiary|quaternary)\.opacity\(|foregroundStyle\(\.[a-zA-Z]+\.opacity|\.ultraThinMaterial' \
   -- 'Prompt Playground/*.swift' \
   ':!Prompt Playground/DesignSystem/DesignTokens.swift' \
   ':!Prompt Playground/DesignSystem/Theme.swift'
 ```
+
+What it catches — and what it deliberately allows:
+
+- **Catches** macOS semantic text styles (`.body`, `.caption`, …), raw font sizes (`.system(size:)` — including `Font.system(size:)`), off-grid spacing/padding/radius literals, **text-vibrancy opacity** (`.primary.opacity(…)`, `foregroundStyle(.x.opacity(…))` — §3.4 says use semantic roles), and raw `.ultraThinMaterial` in views (chrome → `.glassEffect`, content → `.dsCard()`).
+- **Allows** `spacing: 0` (a "no gap" declaration, trivially on the 4pt grid) and opacity on *shape* paints (borders, fills, shadows, canvas wires): §3.4/§5.2 themselves mandate category-color tints like `accent@0.12` and "dsInfo @ 60%", so a blanket `.opacity(` ban would contradict the spec. Repeated tint patterns still belong behind a DS modifier (`.dsBadge`, `.dsHairline`) — the grep just doesn't police one-off sanctioned tints.
 
 ---
 
 ## Appendix — token quick-reference
 
 ```
-type:    display 30sb · title 22sb · heading 17sb · body 15 · label 14m · caption 13 · micro 12 · code 14 mono
+type:    display 30sb · title 22sb · heading 17sb · body 15 · label 14m · caption 13 · micro 12 · code 14 mono · codeMicro 12 mono
 space:   xxs 2 · xs 4 · sm 8 · md 12 · lg 16 · xl 24 · xxl 32        (4pt grid)
 radius:  sm 6 · md 8 · lg 12
 size:    control 28 · controlLarge 32 · fieldMini 88 · panelMin 360 · sheetMin 560

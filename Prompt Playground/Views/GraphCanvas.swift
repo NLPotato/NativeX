@@ -22,13 +22,17 @@ private struct CanvasSheetID: Identifiable { let id: UUID }
 func kindTint(_ kind: NodeKind) -> Color {
     switch kind {
     case .promptGroup: return Theme.accent                  // container — accent identity on selection
-    case .instruction, .fewshot, .history, .current:
-        return Theme.cyan                                   // prompt blocks — dsInfo
+    // Prompt blocks: quiet-but-separate hues within the cyan family (§5.2) so a stacked group
+    // reads its block kinds apart at a glance.
+    case .instruction: return Theme.cyan                    // family anchor
+    case .fewshot:     return Theme.teal
+    case .history:     return Theme.violet
+    case .current:     return Theme.blue
     case .guided, .tool: return Theme.cyan.opacity(0.6)     // schema/tool blocks — dsInfo @ 60%
     case .input:       return .gray                         // data source — neutral, no category color
-    case .nativeAPI:   return .gray                         // utility — neutral (the cyan badge carries the hue)
+    case .nativeAPI:   return .gray                         // utility — neutral (the badge carries the hue)
     case .hook:        return Theme.gold                    // developer/power — macOS-only gold
-    case .fm:          return Theme.accent                  // execution — accent + radiance
+    case .fm:          return Theme.accent                  // execution — accent on SELECTION only; idle is neutral
     case .compare:     return Theme.pink                    // analysis — pink
     }
 }
@@ -270,21 +274,34 @@ private struct EdgeHitLayer: View {
 // MARK: - Portability badge (design.md §6.2)
 
 /// Cyan `laptopcomputer.and.iphone` = runs sandboxed on iOS + macOS; gold `laptopcomputer` =
-/// macOS-only (sandbox off — client apps can't use it). Shared by the canvas headers + inspector.
+/// macOS-only (sandbox off — client apps can't use it). Inspector-only since the canvas de-clutter
+/// (§6.2) — node headers stay minimal; `chip` renders it as a tinted capsule.
 struct PortabilityBadge: View {
     let portability: Portability
     var showLabel = false
+    var chip = false
+
+    private var tint: Color { portability.isPortable ? Color.dsInfo : Color.dsWarning }
 
     var body: some View {
         HStack(spacing: DS.Space.xxs) {
             Image(systemName: portability.isPortable ? "laptopcomputer.and.iphone" : "laptopcomputer")
-                .font(.dsCaption)
+                .font(chip ? .dsMicro : .dsCaption)
             if showLabel { Text(portability.label).font(.dsMicro) }
         }
-        .foregroundStyle(portability.isPortable ? Color.dsInfo : Color.dsWarning)
+        .modifier(BadgeChrome(tint: tint, chip: chip))
         .help(portability.isPortable
               ? "Runs sandboxed on iOS and macOS"
               : "macOS only — needs the sandbox off; client iOS apps can’t use this")
+    }
+
+    /// Capsule chip (`.dsBadge`) vs the quiet tinted-text style.
+    private struct BadgeChrome: ViewModifier {
+        let tint: Color
+        let chip: Bool
+        func body(content: Content) -> some View {
+            if chip { content.dsBadge(tint) } else { content.foregroundStyle(tint) }
+        }
     }
 }
 
@@ -295,6 +312,7 @@ private struct NodeCardView: View {
     let node: GraphNode
 
     @State private var dragStarts: [UUID: CGPoint]? = nil   // start positions for a (possibly multi-) node drag
+    @State private var dragSourceGroups: Set<UUID> = []     // groups the dragged blocks BELONGED to — re-stacked on drop
     @State private var resizeStart: CGSize? = nil
     @State private var hoveredInput: String? = nil    // port currently hovered → grows its chip + dot
     @State private var hoveredOutput: String? = nil
@@ -391,7 +409,13 @@ private struct NodeCardView: View {
                         engine.resizeNode(node.id, to: CGSize(width:  s.width  + v.translation.width  / engine.scale,
                                                               height: s.height + v.translation.height / engine.scale))
                     }
-                    .onEnded { _ in resizeStart = nil; engine.settleLayout(after: [node.id]) }
+                    .onEnded { _ in
+                        resizeStart = nil; engine.settleLayout(after: [node.id])
+                        // A member's new size reflows its group's stack (and the frame around it).
+                        if let g = engine.graph.node(node.id)?.groupID {
+                            withAnimation(.easeOut(duration: 0.2)) { engine.autoLayoutGroup(g) }
+                        }
+                    }
             )
             .help("Drag to resize (width + height)")
     }
@@ -403,7 +427,9 @@ private struct NodeCardView: View {
         let row = HStack(spacing: DS.Space.sm) {
             Image(systemName: node.kind.symbol)
                 .font(.dsBody.weight(.semibold))
-                .foregroundStyle(tint)                  // each kind's hue rides on its icon
+                // Each kind's hue rides on its icon — except the FM node, which stays neutral at idle
+                // (accent = running/selected only; the selection border/glow brings the green back).
+                .foregroundStyle(node.kind == .fm && !selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 // Line 1: the distinguishing NAME — user title, else a computed default. Double-click to rename.
@@ -431,8 +457,7 @@ private struct NodeCardView: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
-            PortabilityBadge(portability: node.portability)   // trailing end of the header chip (§6.2)
-            statusDot
+            statusDot   // portability moved to the inspector (§6.2) — the canvas header stays minimal
         }
         .padding(.horizontal, DS.Space.md)
         .frame(height: NodeMetrics.header, alignment: .center)
@@ -497,7 +522,7 @@ private struct NodeCardView: View {
     /// from the literal prompt prose (feedback #6).
     private func promptBand(_ text: String) -> some View {
         Text(highlightedPrompt(text))
-            .font(.dsMicro).foregroundStyle(.primary)   // bright prose; {{var}} runs override with accent
+            .font(.dsCaption).foregroundStyle(.primary)   // 13pt prose — the prompt is the point; keep it readable
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, DS.Space.md).padding(.top, DS.Space.xs).padding(.bottom, DS.Space.sm)
             // Bottom corners match the card so the recess doesn't poke past the rounded edge.
@@ -588,9 +613,10 @@ private struct NodeCardView: View {
         if selected { return tint }                      // selected border carries the node's own hue
         if run?.status == .error { return Color.dsDanger.opacity(0.7) }
         if run == nil, !issues.isEmpty { return Theme.gold.opacity(0.65) }   // amber = not ready
-        // Persistent category borders (§5.2): FM accent, Hook gold, Compare pink; the rest neutral.
+        // Persistent category borders (§5.2): Hook gold, Compare pink; the rest neutral. The FM node is
+        // deliberately NOT green at idle — accent means running/selected/succeeded, never "is an FM node"
+        // (its radiance + selection glow carry the green when those states are true).
         switch node.kind {
-        case .fm:      return Theme.accent.opacity(0.45)
         case .hook:    return Theme.gold.opacity(0.55)
         case .compare: return Theme.pink.opacity(0.55)
         default:       return .dsHairline                // success is shown by the status dot, not chrome
@@ -630,6 +656,7 @@ private struct NodeCardView: View {
                     let ids: Set<UUID> = engine.selectedSet.count > 1 ? engine.selectedIDs : [node.id]
                     dragStarts = Dictionary(uniqueKeysWithValues:
                         ids.compactMap { id in engine.graph.node(id).map { (id, CGPoint(x: $0.x, y: $0.y)) } })
+                    dragSourceGroups = Set(ids.compactMap { engine.graph.node($0)?.groupID })
                 }
                 let dx = v.translation.width / engine.scale, dy = v.translation.height / engine.scale
                 for (id, s) in dragStarts ?? [:] { engine.move(id, to: CGPoint(x: s.x + dx, y: s.y + dy)) }
@@ -638,7 +665,13 @@ private struct NodeCardView: View {
             .onEnded { _ in
                 let moved = Set((dragStarts ?? [:]).keys)
                 dragStarts = nil; engine.endGroupDrag()
-                engine.settleLayout(after: moved.isEmpty ? [node.id] : moved)   // push aside overlaps; refit groups
+                let ids = moved.isEmpty ? [node.id] : moved
+                engine.settleLayout(after: ids)   // push aside overlaps; refit groups
+                // Drag-to-order: any group that just gained/kept/lost a moved member re-stacks into a
+                // tidy column (member order = the drop's top→bottom order, i.e. the assembly order).
+                let groups = Set(ids.compactMap { engine.graph.node($0)?.groupID }).union(dragSourceGroups)
+                dragSourceGroups = []
+                withAnimation(.easeOut(duration: 0.2)) { for g in groups { engine.autoLayoutGroup(g) } }
             }
     }
 
@@ -779,8 +812,6 @@ private struct GroupFrameView: View {
             if let api = group.apiName {   // §6.1 — the request this group assembles
                 Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).lineLimit(1)
             }
-            // Most restrictive tier of the group's subgraph (a script hook upstream ⇒ macOS-only).
-            PortabilityBadge(portability: engine.graph.subgraphPortability(of: group.id))
             if dropping { Text("add").font(.dsMicro.weight(.semibold)).foregroundStyle(Theme.accent) }
             if !dropping, !issues.isEmpty {
                 Image(systemName: "exclamationmark.triangle.fill").font(.dsMicro).foregroundStyle(.dsWarning)
