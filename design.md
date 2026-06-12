@@ -177,6 +177,8 @@ VStack(alignment: .leading, spacing: DS.Space.sm)
 - **Mono variant:** `.dsCode` font; everything else identical.
 - **No bespoke widths.** Mini inline fields use `DS.Size.fieldMiniWidth` (88pt); full-width fields use `.infinity`.
 
+**`api:` parameter — inline API annotation.** `DSField` accepts an optional `api:` string that appends a `.dsCodeMicro` tertiary mono suffix on the label line naming the exact official Apple API symbol/argument the control feeds (e.g. `"NLTokenizer.setLanguage : NLLanguage"`, `"@Generable struct Name"`). These strings come exclusively from `Core/APICatalog.swift` structured data (`APIArgument.param` / `.fromInput`) — never hand-written prose. Placement rule: inline on the label line for full-width rows only. In narrow or half-width rows the caption must not middle-truncate into unreadability — stack the field full-width instead, or drop the `api:` caption. The caption must never visually outweigh its label; long explanations belong in `help:`, not `api:`.
+
 ### 4.2 Cards
 
 - `.dsCard(raised: Bool)` — frosted `.ultraThinMaterial` + accent border. `raised: true` adds accent tint fill and brighter border for selected/active state.
@@ -244,9 +246,11 @@ Never apply to other node types. This is the single use of `Theme.lime` in the e
 
 ## 6. UX-First Patterns
 
-### 6.1 Friendly label + official Apple API name
+### 6.1 Friendly label + official Apple API name (node level)
 
 Every node exposes two labels: a friendly primary label and the underlying Apple API name. The friendly label is `.dsLabel`; the API name is a quiet neutral chip (`.tertiary` foreground, no border) — `.dsCodeMicro` on the compact canvas header (with `layoutPriority` so it survives the squeeze over the kind label), `.dsCode` on its own full-width row in the inspector header (never truncated).
+
+For per-argument API annotation inside a node's inspector, see the `api:` parameter on `DSField` (§4.1). This is the UX-First principle applied at interaction granularity: a developer learns the Foundation Models / NaturalLanguage API by using the GUI and can predict the code their settings produce — annotation at the point of interaction, not in a separate reference panel.
 
 ```
 Node canvas header:   Foundation Model  ·  LanguageModelSession
@@ -304,6 +308,15 @@ All execution feedback lives on the canvas. No navigation to Run History is requ
 ### 6.4 Prompt group = managed stack
 
 A Prompt group's members are auto-laid-out as one tidy left-aligned column (`GraphEngine.autoLayoutGroup`): blocks stack top→bottom in assembly order, the frame shrink-wraps the stack (16pt pad, 12pt gap). Dragging a block above/below a sibling re-orders the prompt — the stack snaps tidy on drop; the inspector's block list offers the same via up/down arrows. Free-form placement inside a group is intentionally NOT preserved: position **is** order, so the layout always shows the truth.
+
+### 6.5 Declaration-driven op editors
+
+Node/op editors are **generated from the op's declaration** — never hand-built per op. This is required for scalability: adding a new native API op must require zero new UI code.
+
+- **`HookOp.paramKeys`** lists only the real API arguments for that op. The inspector iterates this list; unlisted arguments never appear.
+- **`HookParam.control`** declares the widget: `.text` renders a free-text field (supports `{{vars}}`); `.choice([...])` renders a picker — closed sets are never typed as magic strings in text fields.
+- **`HookOp.returnShape`** (`text | list | number | object`) drives the single shared **"Output as" `OutputProjection` control** (visible only for list shapes; object shapes emit canonical JSON). One control handles every op — no per-op output UI.
+- **Catalog pickers** (op/API picker): at rest, a combo-box row showing the current selection; on expand, a framework-grouped searchable list. Planned (non-selectable) entries live in a folded disclosure — never occupying resting space.
 
 ---
 
