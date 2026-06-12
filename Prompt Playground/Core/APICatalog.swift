@@ -383,7 +383,8 @@ extension APICatalog {
                     APIArgument("responseFormat", "Transcript.ResponseFormat", "recorded on the prompt entry"),
                 ],
                 returns: "GeneratedContent (constrained decoding — token masking to schema-valid tokens)",
-                docPath: "foundationmodels/dynamicgenerationschema")]
+                docPath: "foundationmodels/dynamicgenerationschema",
+                note: "Two official lanes: this UI-authored schema RUNS as runtime DynamicGenerationSchema; it SHIPS as the compile-time @Generable macro (the “@Generable Swift” pane is the promotion path).")]
 
         case .tool:
             return [APICall(
@@ -445,6 +446,30 @@ extension APICatalog {
             guard let op = node.hook?.op, let entry = entry(for: op) else { return [] }
             return entry.calls
         }
+    }
+
+    /// Inline label-line annotation for a Hook/Native-API *param field*: the exact official
+    /// argument the param feeds, e.g. "NLTokenizer.setLanguage : NLLanguage". nil when the param
+    /// is node plumbing (output formatting) rather than an API argument — the caller says so.
+    static func argAnnotation(op: HookOp, paramLabel: String) -> String? {
+        guard let entry = entry(for: op) else { return nil }
+        for call in entry.calls {
+            if let arg = call.args.first(where: { $0.source.contains("“\(paramLabel)” param") }) {
+                return "\(call.symbol).\(arg.name) : \(arg.type)"
+            }
+        }
+        return nil
+    }
+
+    /// Same, for the op's *in var* — which official argument receives the input wire's value.
+    static func inputAnnotation(op: HookOp) -> String? {
+        guard let entry = entry(for: op) else { return nil }
+        for call in entry.calls {
+            if let arg = call.args.first(where: { $0.source.contains("input wire") }) {
+                return "\(call.symbol).\(arg.name) : \(arg.type)"
+            }
+        }
+        return nil
     }
 
     private static func samplingSource(_ config: GenConfig) -> String {

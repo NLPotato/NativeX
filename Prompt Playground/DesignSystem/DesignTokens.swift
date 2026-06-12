@@ -137,15 +137,25 @@ extension View {
 }
 
 /// The one labeled-field component: label + control + (help | error). See design.md §4.1.
+/// `api` is the inline official-API annotation (UX-First §4.2): the exact Swift symbol/argument
+/// this control feeds, rendered as a micro-mono suffix on the label line — so a developer learns
+/// the underlying API at the point of interaction and can predict the code their settings produce.
 struct DSField<Control: View>: View {
     let label: String
+    var api: String? = nil
     var help: String? = nil
     var error: String? = nil
     @ViewBuilder var control: () -> Control
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            Text(label).font(.dsLabel).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: DS.Space.sm) {
+                Text(label).font(.dsLabel).foregroundStyle(.secondary)
+                if let api {
+                    Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
+            }
             control()
             if let error { Text(error).font(.dsCaption).foregroundStyle(.dsDanger) }
             else if let help { Text(help).font(.dsCaption).foregroundStyle(.tertiary) }

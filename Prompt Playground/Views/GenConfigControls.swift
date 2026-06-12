@@ -17,6 +17,7 @@ struct GenConfigControls: View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.xs) {
                 Text("Sampling").font(.dsLabel)
+                apiTag("GenerationOptions(sampling:)")
                 Button { showSamplingInfo.toggle() } label: {
                     Image(systemName: "info.circle")
                 }
@@ -36,13 +37,18 @@ struct GenConfigControls: View {
             .labelsHidden()
             if config.sampling == .topK {
                 Stepper(value: topK, in: 1...100) {
-                    HStack { Text("Top-k").font(.dsLabel); Text("\(config.topK ?? 50)").font(.dsMicro).foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Top-k").font(.dsLabel)
+                        Text("\(config.topK ?? 50)").font(.dsMicro).foregroundStyle(.secondary)
+                        apiTag(".random(top: \(config.topK ?? 50))")
+                    }
                 }
             }
             if config.sampling == .nucleus {
                 HStack {
                     Text("Threshold p").font(.dsLabel)
                     Text(String(format: "%.2f", config.probabilityThreshold ?? 0.9)).font(.dsMicro).foregroundStyle(.secondary)
+                    apiTag(".random(probabilityThreshold: \(String(format: "%.2f", config.probabilityThreshold ?? 0.9)))")
                 }
                 Slider(value: probabilityThreshold, in: 0.05...1.0, step: 0.05)
             }
@@ -51,6 +57,7 @@ struct GenConfigControls: View {
                     HStack {
                         Text("Seed (reproducible)").font(.dsLabel)
                         if let s = config.seed { Text("\(s)").font(.dsMicro.monospacedDigit()).foregroundStyle(.secondary) }
+                        apiTag("seed: UInt64?")
                     }
                 }
                 if config.seed != nil {
@@ -68,6 +75,7 @@ struct GenConfigControls: View {
                 HStack {
                     Text("Temperature").font(.dsLabel)
                     if let t = config.temperature { Text(String(format: "%.2f", t)).font(.dsMicro).foregroundStyle(.secondary) }
+                    apiTag("GenerationOptions(temperature:)")
                 }
             }
             if config.temperature != nil {
@@ -77,6 +85,7 @@ struct GenConfigControls: View {
                 HStack {
                     Text("Max response tokens").font(.dsLabel)
                     if let m = config.maximumResponseTokens { Text("\(m)").font(.dsMicro).foregroundStyle(.secondary) }
+                    apiTag("GenerationOptions(maximumResponseTokens:)")
                 }
             }
             if config.maximumResponseTokens != nil {
@@ -102,6 +111,12 @@ struct GenConfigControls: View {
         }
         .padding(DS.Space.md)
         .frame(width: 320)
+    }
+
+    /// Inline official-API annotation (UX-First §4.2) — the GenerationOptions argument this
+    /// control tunes, with the live value where it reads naturally.
+    private func apiTag(_ s: String) -> some View {
+        Text(s).font(.dsCodeMicro).foregroundStyle(.tertiary).lineLimit(1)
     }
 
     private func infoRow(_ name: String, _ desc: String) -> some View {

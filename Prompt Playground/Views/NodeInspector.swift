@@ -167,7 +167,9 @@ private struct InstructionEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let i = $node.instruction.defaulted(InstructionPayload()) {
-                DSField(label: "Instruction", help: "System / persona / rules / NOT-TO-DO. {{vars}} are filled by wired Input or process nodes.") {
+                DSField(label: "Instruction",
+                        api: "Transcript.Instructions(segments:)",
+                        help: "System / persona / rules / NOT-TO-DO. {{vars}} are filled by wired Input or process nodes.") {
                     TextEditor(text: i.text).font(.dsCode).dsEditor(lines: 8)
                 }
             }
@@ -186,12 +188,15 @@ private struct HistoryEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let h = $node.history.defaulted(HistoryPayload()) {
-                DSField(label: "Role") {
+                DSField(label: "Role",
+                        api: "Human → Transcript.Prompt · AI → Transcript.Response") {
                     Picker("", selection: h.role) {
                         ForEach(TurnRole.allCases, id: \.self) { Text($0.label).tag($0) }
                     }.pickerStyle(.segmented).labelsHidden()
                 }
-                DSField(label: "Content", help: "A PAST turn. Order follows top→bottom canvas position.") {
+                DSField(label: "Content",
+                        api: "segments : [Transcript.Segment]",
+                        help: "A PAST turn. Order follows top→bottom canvas position.") {
                     TextEditor(text: h.content).font(.dsCode).dsEditor(lines: 5)
                 }
             }
@@ -210,7 +215,9 @@ private struct CurrentEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let c = $node.current.defaulted(CurrentTurnPayload()) {
-                DSField(label: "Template", help: "The live turn sent to the model (respond-to). Wire an Input node into its {{vars}}.") {
+                DSField(label: "Template",
+                        api: "session.respond(to:) — the live turn",
+                        help: "The live turn sent to the model (respond-to). Wire an Input node into its {{vars}}.") {
                     TextEditor(text: c.template).font(.dsCode).dsEditor(lines: 5)
                 }
             }
@@ -254,29 +261,71 @@ private struct GuidedEditor: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \SchemaModel.createdAt, order: .reverse) private var library: [SchemaModel]
     @State private var savedNote: String? = nil
+    @State private var query = ""
+    @State private var showLibrary = false
+    @State private var newSheet = false
+
+    private var matches: [SchemaModel] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return q.isEmpty ? library : library.filter { $0.name.lowercased().contains(q) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
-            Text("Constrain the model’s output to this schema (Apple Guided Generation). This is where you author the output contract.")
+            Text("Constrain the model’s output to ONE @Generable (Apple Guided Generation). In the graph it runs as runtime DynamicGenerationSchema; the “@Generable Swift” pane below is the same contract as the compile-time macro that ships.")
                 .font(.dsCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
-            // Library: load a saved schema into this node, or save this one (versioned, like prompt
-            // templates) so other graphs and the Lab's dynamic lane can reuse it.
-            HStack(spacing: DS.Space.sm) {
-                Menu {
-                    if library.isEmpty { Text("No saved schemas yet") }
-                    ForEach(library) { m in
-                        Button("\(m.name) v\(m.version)") { if let def = m.def { node.guided?.schemaDef = def } }
-                    }
-                } label: { Label("Load", systemImage: "tray.and.arrow.up") }
-                .menuStyle(.borderlessButton).fixedSize()
+            // Reuse-or-create, one section: search the saved @Generable library (versioned, shared
+            // with other graphs + the Lab's dynamic lane), or start a fresh one in a focused sheet.
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                DisclosureGroup(isExpanded: $showLibrary) {
+                    VStack(alignment: .leading, spacing: DS.Space.xs) {
+                        HStack(spacing: DS.Space.sm) {
+                            Image(systemName: "magnifyingglass").font(.dsCaption).foregroundStyle(.tertiary)
+                            TextField("Search saved @Generable schemas…", text: $query)
+                                .textFieldStyle(.plain).font(.dsCaption)
+                        }
+                        .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
 
-                Button { saveToLibrary() } label: { Label("Save to library", systemImage: "tray.and.arrow.down") }
-                    .buttonStyle(.borderless)
-                Spacer(minLength: 0)
-                if let savedNote { Text(savedNote).font(.dsMicro).foregroundStyle(.dsSuccess) }
+                        ScrollView {
+                            VStack(spacing: DS.Space.xs) {
+                                ForEach(matches) { m in SchemaLibraryRow(model: m, node: $node) }
+                                if matches.isEmpty {
+                                    Text(library.isEmpty ? "No saved schemas yet — “Save to library” adds this one."
+                                                         : "No schema matches “\(query)”.")
+                                        .font(.dsCaption).foregroundStyle(.tertiary)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(DS.Space.sm)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 180)
+                    }
+                    .padding(.top, DS.Space.sm)
+                } label: {
+                    HStack(spacing: DS.Space.sm) {
+                        Text("@Generable library").font(.dsLabel)
+                        Text("\(library.count) saved").font(.dsMicro).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        Button {
+                            node.guided?.schemaDef = .blank
+                            newSheet = true
+                        } label: { Label("New…", systemImage: "plus") }
+                        .buttonStyle(.borderless).font(.dsCaption)
+                        .help("Start a fresh @Generable in a focused editor")
+                    }
+                }
+
+                HStack(spacing: DS.Space.sm) {
+                    Button { saveToLibrary() } label: { Label("Save to library", systemImage: "tray.and.arrow.down") }
+                        .buttonStyle(.borderless)
+                    Spacer(minLength: 0)
+                    if let savedNote { Text(savedNote).font(.dsMicro).foregroundStyle(.dsSuccess) }
+                }
+                .font(.dsCaption)
             }
-            .font(.dsCaption)
+            .dsGroup()
 
             SchemaEditorView(def: schemaBinding)
 
@@ -292,6 +341,9 @@ private struct GuidedEditor: View {
                     Text("the typed shipping lane").font(.dsCodeMicro).foregroundStyle(.tertiary)
                 }
             }
+        }
+        .sheet(isPresented: $newSheet) {
+            SchemaEditorSheet(def: schemaBinding, isPresented: $newSheet)
         }
     }
 
@@ -309,6 +361,38 @@ private struct GuidedEditor: View {
     }
 }
 
+/// One saved @Generable in the library list: name + version + shape summary; tap loads it into the
+/// node (replacing the current schema — save first to keep edits).
+private struct SchemaLibraryRow: View {
+    let model: SchemaModel
+    @Binding var node: GraphNode
+
+    private var isCurrent: Bool { node.guided?.schemaDef?.typeName == model.name }
+
+    var body: some View {
+        Button {
+            if let def = model.def { node.guided?.schemaDef = def }
+        } label: {
+            HStack(spacing: DS.Space.sm) {
+                Text(model.name).font(.dsLabel)
+                Text("v\(model.version)").dsBadge(.secondary)
+                if let def = model.def {
+                    Text("\(def.fields.count) field\(def.fields.count == 1 ? "" : "s")")
+                        .font(.dsMicro).foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Text("@Generable").font(.dsCodeMicro).foregroundStyle(.tertiary)
+            }
+            .padding(DS.Space.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isCurrent ? Theme.accent.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+        }
+        .buttonStyle(.plain)
+        .help("Load “\(model.name)” v\(model.version) into this node")
+    }
+}
+
 // MARK: - Tool
 
 private struct ToolEditor: View {
@@ -317,8 +401,12 @@ private struct ToolEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let t = $node.tool.defaulted(ToolPayload()) {
-                DSField(label: "Name") { TextField("tool name", text: t.name).dsTextField() }
-                DSField(label: "Description") { TextEditor(text: t.toolDescription).font(.dsCode).dsEditor(lines: 4) }
+                DSField(label: "Name", api: "ToolDefinition(name:)") {
+                    TextField("tool name", text: t.name).dsTextField()
+                }
+                DSField(label: "Description", api: "ToolDefinition(description:)") {
+                    TextEditor(text: t.toolDescription).font(.dsCode).dsEditor(lines: 4)
+                }
             }
             Label("Described, not callable (v1). The model is told this tool exists (folded into the instructions), but can’t invoke it yet — real tools need compile-time Swift.",
                   systemImage: "info.circle")
@@ -552,15 +640,28 @@ private struct HookEditor: View {
                             .font(.dsMicro).foregroundStyle(.dsWarning)
                     }
                 }
+                // Every field's label line names the official argument it feeds (UX-First §4.2) —
+                // in var → the API argument receiving the wire; out var is node plumbing (the {{var}}
+                // that carries the return value); params either feed an argument or post-process.
+                let op = node.hook?.op ?? .textTransform
                 HStack(spacing: DS.Space.md) {
-                    DSField(label: "in (input var)") { TextField("input", text: h.inputVar).dsTextField() }
-                    DSField(label: "out (output var)") { TextField("output", text: h.outputVar).dsTextField() }
+                    DSField(label: "in (input var)",
+                            api: APICatalog.inputAnnotation(op: op)) {
+                        TextField("input", text: h.inputVar).dsTextField()
+                    }
+                    DSField(label: "out (output var)",
+                            api: "return value → {{\(node.hook?.outputVar.isEmpty == false ? node.hook!.outputVar : op.defaultOutputVar)}}") {
+                        TextField("output", text: h.outputVar).dsTextField()
+                    }
                 }
                 ForEach(node.hook?.op.paramKeys ?? [], id: \.self) { param in
                     if param == .command {
                         ScriptCommandEditor(node: $node)
                     } else {
-                        DSField(label: param.label, help: param.placeholder) {
+                        DSField(label: param.label,
+                                api: APICatalog.argAnnotation(op: op, paramLabel: param.label)
+                                     ?? "formats the return value — not an API argument",
+                                help: param.placeholder) {
                             TextField(param.placeholder, text: paramBinding(param.rawValue)).dsTextField()
                         }
                     }
@@ -640,6 +741,7 @@ private struct ScriptCommandEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             DSField(label: "command — /bin/zsh",
+                    api: "Process.arguments = [\"-c\", command]",
                     help: "stdin ← in var · stdout → out var · context vars as $PP_NAME · non-zero exit or timeout ⇒ node error") {
                 TextEditor(text: commandBinding).font(.dsCode).dsEditor(lines: 6)
             }

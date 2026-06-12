@@ -64,16 +64,22 @@ struct SchemaEditorView: View {
             // Schema-level metadata reads as the form header (no card) so it stays distinct from the
             // field-entry cards below.
             VStack(alignment: .leading, spacing: DS.Space.md) {
-                DSField(label: "Schema name") {
+                DSField(label: "Schema name",
+                        api: "@Generable struct \(def.typeName.isEmpty ? "‹TypeName›" : def.typeName)") {
                     TextField("TypeName", text: $def.typeName).dsTextField()
                 }
-                DSField(label: "Description", help: "Guides the model — what this schema represents.") {
+                DSField(label: "Description",
+                        api: "@Generable(description:)",
+                        help: "Guides the model — what this schema represents.") {
                     TextField("What this schema represents", text: $def.description).dsTextField()
                 }
             }
 
             VStack(alignment: .leading, spacing: DS.Space.md) {
-                DSSectionHeader("Fields")
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.sm) {
+                    DSSectionHeader("Fields")
+                    Text("each field → a @Guide property").font(.dsCodeMicro).foregroundStyle(.tertiary)
+                }
                 FieldsEditor(fields: $def.fields, depth: 0)
             }
         }
@@ -112,6 +118,15 @@ struct FieldRow: View {
         _expanded = State(initialValue: depth == 0)   // top-level fields open; nested collapsed so deep trees stay scannable
     }
 
+    /// The exact Swift this field becomes in the generated @Generable — the inline mapping caption.
+    private var swiftDecl: String {
+        let name = field.name.isEmpty ? "‹name›" : field.name
+        let type = field.type.swiftName + (field.isOptional ? "?" : "")
+        let isEnum = { if case .enumeration = field.type { return true } else { return false } }()
+        let guide = isEnum ? "@Guide(.anyOf: …) " : (field.description.isEmpty ? "" : "@Guide(description: …) ")
+        return "\(guide)let \(name): \(type)"
+    }
+
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: DS.Space.sm) {
@@ -119,8 +134,12 @@ struct FieldRow: View {
                     TextField("name", text: $field.name).dsTextField()
                     Toggle("optional", isOn: $field.isOptional).toggleStyle(.checkbox).font(.dsCaption)
                 }
-                TextField("description", text: $field.description).dsTextField()
+                DSField(label: "description", api: "@Guide(description:)") {
+                    TextField("description", text: $field.description).dsTextField()
+                }
                 TypeEditor(type: $field.type, depth: depth)
+                Text(swiftDecl).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
             .padding(.top, DS.Space.sm)
         } label: {
@@ -282,6 +301,19 @@ extension SchemaDef.FieldType {
         case .enumeration(let c):  return "Enum (\(c.count))"
         case .array(let of, _, _): return "Array<\(of.shortLabel)>"
         case .object(let o):       return "Object {\(o.fields.count)}"
+        }
+    }
+
+    /// The Swift type this field renders as in the generated @Generable (the mapping caption).
+    var swiftName: String {
+        switch self {
+        case .string:              return "String"
+        case .int:                 return "Int"
+        case .double:              return "Double"
+        case .bool:                return "Bool"
+        case .enumeration:         return "String"   // closed set enforced via @Guide(.anyOf) — matches SwiftCodegen
+        case .array(let of, _, _): return "[\(of.swiftName)]"
+        case .object(let o):       return o.name
         }
     }
 }
