@@ -793,7 +793,7 @@ final class GraphEngine {
         case .guided:      return .guided(.glossLike)
         case .tool:        return .tool(name: "", description: "")
         case .input:       return .input(source: .staticLiteral, statics: ["input": ""])
-        case .nativeAPI:   return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words", params: ["format": "numbered"])
+        case .nativeAPI:   return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words")
         case .hook:        return .hook(op: .script, inputVar: "input", outputVar: "result", params: ["timeout": "30"])
         case .fm:          return .fm()
         case .compare:     return .compare()
@@ -816,7 +816,7 @@ final class GraphEngine {
         let input = GraphNode.input(source: .staticLiteral, statics: ["sentence": "Der Hund schläft."],
                                     x: 40, y: 300, title: "Sentence")
         let tok = GraphNode.nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words",
-                                      params: ["format": "numbered"], x: 40, y: 520, title: "Tokenize words")
+                                      x: 40, y: 520, title: "Tokenize words")
         let fm = GraphNode.fm(x: 1020, y: 240, title: "Foundation Model")
         var g = GraphDef(nodes: [group, instr, current, guided, input, tok, fm])
         g.edges = [

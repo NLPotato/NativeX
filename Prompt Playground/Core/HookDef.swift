@@ -37,15 +37,19 @@ enum Portability: String, Codable, Sendable {
     var isPortable: Bool { self == .universal }
 }
 
-/// Editable parameters an op reads out of `HookDef.params`. Each renders one labelled field.
+/// Editable parameters an op reads out of `HookDef.params`. Each declares which control renders
+/// it, so the inspector is generated from the op's argument list — no per-op UI code, and a node
+/// only ever shows the arguments its API actually takes.
 enum HookParam: String, Sendable, Hashable {
-    case language, format, pattern, group, replacement, path, mode, command, timeout
-    case tokenFormat   // countTokens: number only, or a human context-share report
+    case language, pattern, group, replacement, path, mode, command, timeout
+
+    /// How the inspector renders this parameter. `.choice` is a closed set (segmented/menu picker
+    /// instead of free text — no magic strings to memorize); `.text` is free text ({{vars}} allowed).
+    enum Control { case text, choice([String]) }
 
     var label: String {
         switch self {
         case .language:    return "language"
-        case .format:      return "format"
         case .pattern:     return "pattern"
         case .group:       return "group"
         case .replacement: return "replace"
@@ -53,21 +57,57 @@ enum HookParam: String, Sendable, Hashable {
         case .mode:        return "mode"
         case .command:     return "command"
         case .timeout:     return "timeout"
-        case .tokenFormat: return "format"
         }
     }
     var placeholder: String {
         switch self {
         case .language:    return "e.g. German or {{learning}}"
-        case .format:      return "numbered | lines | comma"
         case .pattern:     return "regular expression"
         case .group:       return "capture group # (0 = whole match)"
         case .replacement: return "replacement / $1"
         case .path:        return "dotted key path, e.g. words.0.surface"
-        case .mode:        return "trim | lower | upper | trimlines"
+        case .mode:        return "trim"
         case .command:     return "shell command — input on stdin, stdout becomes the output var"
         case .timeout:     return "seconds (default 30)"
-        case .tokenFormat: return "count | report (≈tokens · % of window)"
+        }
+    }
+    var control: Control {
+        switch self {
+        case .mode: return .choice(["trim", "lower", "upper", "trimlines"])
+        default:    return .text
+        }
+    }
+}
+
+/// What an op's underlying API call RETURNS, before the node serializes it into the string
+/// variable lane. Declared per op so the one shared `OutputProjection` (and its one UI control)
+/// applies to every op of that shape — ops never invent private formatting vocabularies.
+enum HookReturnShape: Sendable {
+    case text     // a single string — passed through as-is
+    case list     // [String] — serialized via the node's OutputProjection
+    case number   // a count/scalar — stringified
+    case object   // structured — emitted as canonical JSON (feeds JSON extract / structured lanes)
+}
+
+/// The ONE list serializer, shared by every list-shaped op (node plumbing, not an API argument).
+enum OutputProjection: String, Codable, CaseIterable, Sendable {
+    case numbered, lines, comma, json
+
+    var label: String {
+        switch self {
+        case .numbered: return "Numbered"
+        case .lines:    return "Lines"
+        case .comma:    return "Comma"
+        case .json:     return "JSON"
+        }
+    }
+
+    func render(_ items: [String]) -> String {
+        switch self {
+        case .numbered: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        case .lines:    return items.joined(separator: "\n")
+        case .comma:    return items.joined(separator: ", ")
+        case .json:     return (try? String(data: JSONSerialization.data(withJSONObject: items), encoding: .utf8)) ?? "[]"
         }
     }
 }
@@ -100,7 +140,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "NaturalLanguage POS + lemma + romanization per word"
         case .detectLanguage: return "NLLanguageRecognizer → dominant language code"
         case .sentenceSplit:  return "NLTokenizer → one sentence per line"
-        case .countTokens:    return "Token count vs the 4096-token context window — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
+        case .countTokens:    return "Token count vs the 4096-token context window, as JSON {tokens, contextWindow, percentOfWindow} — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
         case .regexExtract:   return "First match (or capture group) of a pattern"
         case .regexReplace:   return "Replace every match of a pattern"
         case .jsonExtract:    return "Read a dotted key path out of JSON"
@@ -125,18 +165,29 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// The op's REAL API arguments, and nothing else — the inspector renders exactly this list.
+    /// Output serialization is not here; it's the shared `OutputProjection` keyed on `returnShape`.
     var paramKeys: [HookParam] {
         switch self {
-        case .tokenizeWords:  return [.language, .format]
+        case .tokenizeWords:  return [.language]
         case .enrichGloss:    return [.language]
-        case .sentenceSplit:  return [.format]
+        case .sentenceSplit:  return []
         case .detectLanguage: return []
-        case .countTokens:    return [.tokenFormat]
+        case .countTokens:    return []
         case .regexExtract:   return [.pattern, .group]
         case .regexReplace:   return [.pattern, .replacement]
         case .jsonExtract:    return [.path]
         case .textTransform:  return [.mode]
         case .script:         return [.command, .timeout]
+        }
+    }
+
+    /// What the underlying call returns — drives the one shared output-projection control.
+    var returnShape: HookReturnShape {
+        switch self {
+        case .tokenizeWords, .sentenceSplit, .enrichGloss: return .list
+        case .countTokens:                                 return .object
+        default:                                           return .text
         }
     }
     /// A sensible default `outputVar` when the op is first added.
@@ -179,8 +230,23 @@ struct HookDef: Codable, Equatable, Sendable, Identifiable {
     var params: [String: String] = [:]
     var inputVar: String = "input"
     var outputVar: String = ""
+    var projectionRaw: String? = nil   // OutputProjection for list-shaped ops (nil ⇒ default)
 
     var op: HookOp { HookOp(rawValue: opRaw) ?? .textTransform }
+
+    /// The list projection in effect — honors the saved value, then the legacy per-op
+    /// `params["format"]` vocabulary (pre-projection graphs), then the default.
+    var projection: OutputProjection {
+        get {
+            if let p = projectionRaw.flatMap(OutputProjection.init(rawValue:)) { return p }
+            switch params["format"] {   // legacy magic strings, migrated on read
+            case "comma": return .comma
+            case "lines": return .lines
+            default:      return .numbered
+            }
+        }
+        set { projectionRaw = newValue.rawValue }
+    }
 
     init(op: HookOp, inputVar: String = "input", outputVar: String? = nil, params: [String: String] = [:]) {
         self.opRaw = op.rawValue

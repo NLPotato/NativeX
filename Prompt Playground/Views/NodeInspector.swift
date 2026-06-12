@@ -632,61 +632,98 @@ private struct HookEditor: View {
         VStack(alignment: .leading, spacing: DS.Space.lg) {
             if let h = $node.hook.defaulted(HookDef(op: .textTransform)) {
                 OpCatalogPicker(node: $node)
-                if let op = node.hook?.op {
-                    Text(op.detail).font(.dsCaption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !op.portability.isPortable {
-                        Label(op.portability.label, systemImage: "exclamationmark.triangle")
-                            .font(.dsMicro).foregroundStyle(.dsWarning)
-                    }
-                }
-                // Every field's label line names the official argument it feeds (UX-First §4.2) —
-                // in var → the API argument receiving the wire; out var is node plumbing (the {{var}}
-                // that carries the return value); params either feed an argument or post-process.
+                // The whole editor below is GENERATED from the op's declaration: paramKeys says
+                // which arguments exist (and how each renders), returnShape says whether the one
+                // shared "Output as" projection applies. No per-op UI code (UX-First §4.2).
                 let op = node.hook?.op ?? .textTransform
-                HStack(spacing: DS.Space.md) {
-                    DSField(label: "in (input var)",
-                            api: APICatalog.inputAnnotation(op: op)) {
-                        TextField("input", text: h.inputVar).dsTextField()
-                    }
-                    DSField(label: "out (output var)",
-                            api: "return value → {{\(node.hook?.outputVar.isEmpty == false ? node.hook!.outputVar : op.defaultOutputVar)}}") {
-                        TextField("output", text: h.outputVar).dsTextField()
-                    }
+                DSField(label: "in (input var)",
+                        api: APICatalog.inputAnnotation(op: op)) {
+                    TextField("input", text: h.inputVar).dsTextField()
                 }
-                ForEach(node.hook?.op.paramKeys ?? [], id: \.self) { param in
+                ForEach(op.paramKeys, id: \.self) { param in
                     if param == .command {
                         ScriptCommandEditor(node: $node)
                     } else {
                         DSField(label: param.label,
-                                api: APICatalog.argAnnotation(op: op, paramLabel: param.label)
-                                     ?? "formats the return value — not an API argument",
-                                help: param.placeholder) {
-                            TextField(param.placeholder, text: paramBinding(param.rawValue)).dsTextField()
+                                api: APICatalog.argAnnotation(op: op, param: param)) {
+                            paramControl(param)
                         }
                     }
                 }
+                outputSection(h, op: op)
             }
             PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: hookOutput, status: run?.status, error: run?.error)
         }
     }
 
+    /// Renders a param from its declared control: a closed set gets a picker (no magic strings),
+    /// free text gets a field ({{vars}} allowed).
+    @ViewBuilder private func paramControl(_ param: HookParam) -> some View {
+        switch param.control {
+        case .choice(let options):
+            Picker("", selection: paramBinding(param.rawValue, default: options.first ?? "")) {
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+        case .text:
+            TextField(param.placeholder, text: paramBinding(param.rawValue)).dsTextField()
+        }
+    }
+
+    /// The serialization boundary, shared by every op: where the return value lands ({{out var}})
+    /// and — for list-shaped returns only — the one projection control. Object-shaped returns
+    /// state their canonical JSON contract instead of offering bespoke formats.
+    @ViewBuilder private func outputSection(_ h: Binding<HookDef>, op: HookOp) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSField(label: "out (output var)",
+                    api: "node plumbing — names the {{var}} carrying the result") {
+                TextField("output", text: h.outputVar).dsTextField()
+            }
+            switch op.returnShape {
+            case .list:
+                DSField(label: "Output as",
+                        api: "node plumbing — [String] → {{\(currentOutputVar(op))}}") {
+                    Picker("", selection: projectionBinding) {
+                        ForEach(OutputProjection.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                }
+            case .object:
+                Label("Emits canonical JSON — chain a JSON extract node to pull one field.",
+                      systemImage: "curlybraces")
+                    .font(.dsMicro).foregroundStyle(.tertiary)
+            case .text, .number:
+                EmptyView()
+            }
+        }
+        .dsGroup()
+    }
+
+    private func currentOutputVar(_ op: HookOp) -> String {
+        (node.hook?.outputVar.isEmpty == false ? node.hook?.outputVar : nil) ?? op.defaultOutputVar
+    }
+    private var projectionBinding: Binding<OutputProjection> {
+        Binding(get: { node.hook?.projection ?? .numbered }, set: { node.hook?.projection = $0 })
+    }
     private var hookOutput: String? {
         let key = (node.hook?.outputVar.isEmpty ?? true) ? "output" : (node.hook?.outputVar ?? "output")
         return run?.outputs[key]
     }
-    private func paramBinding(_ key: String) -> Binding<String> {
-        Binding(get: { node.hook?.params[key] ?? "" }, set: { node.hook?.params[key] = $0 })
+    private func paramBinding(_ key: String, default def: String = "") -> Binding<String> {
+        Binding(get: { node.hook?.params[key] ?? def }, set: { node.hook?.params[key] = $0 })
     }
 }
 
-/// Searchable catalog picker for the Native API / Hook operation (PRD §4.2, §8.3-lite): search by
-/// name, official symbol, or framework; each row teaches the underlying API. PRD-planned ops
-/// (Vision OCR/barcode, Spotlight, Evaluate) are listed but not selectable.
+/// Catalog picker for the Native API / Hook operation (PRD §4.2, §8.3-lite). COLLAPSED at rest —
+/// one combo-box row showing the selected op (name · symbol · framework) — and expands on click
+/// into a searchable list grouped by framework, with PRD-planned ops folded into their own
+/// disclosure so unselectable rows never occupy resting space. Scales past a flat list.
 private struct OpCatalogPicker: View {
     @Binding var node: GraphNode
     @State private var query = ""
+    @State private var expanded = false
+    @State private var showPlanned = false
 
     /// Ops offered for this node kind (mirrors the original split: NL/FM ops on a Native API node;
     /// glue/script ops on a Hook node). Planned entries surface on the Native API side only.
@@ -694,35 +731,95 @@ private struct OpCatalogPicker: View {
         let ops: [HookOp] = node.kind == .nativeAPI
             ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .countTokens]
             : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform]
-        let available = ops.compactMap(APICatalog.entry(for:))
-        let planned = node.kind == .nativeAPI ? APICatalog.entries.filter { $0.status == .planned } : []
-        return available + planned
+        return ops.compactMap(APICatalog.entry(for:))
+    }
+    private var planned: [APICatalogEntry] {
+        node.kind == .nativeAPI ? APICatalog.entries.filter { $0.status == .planned } : []
     }
     private var matches: [APICatalogEntry] { APICatalog.search(query, in: candidates) }
+    private var plannedMatches: [APICatalogEntry] { APICatalog.search(query, in: planned) }
+    /// Available matches grouped by framework, preserving catalog order — sticky scan headers.
+    private var grouped: [(framework: String, entries: [APICatalogEntry])] {
+        var order: [String] = [], byFw: [String: [APICatalogEntry]] = [:]
+        for e in matches {
+            if byFw[e.framework] == nil { order.append(e.framework) }
+            byFw[e.framework, default: []].append(e)
+        }
+        return order.map { ($0, byFw[$0]!) }
+    }
+    private var selected: APICatalogEntry? { node.hook.flatMap { APICatalog.entry(for: $0.op) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             DSSectionHeader("Operation")
-            HStack(spacing: DS.Space.sm) {
-                Image(systemName: "magnifyingglass").font(.dsCaption).foregroundStyle(.tertiary)
-                TextField("Search APIs — name, symbol, framework…", text: $query)
-                    .textFieldStyle(.plain).font(.dsCaption)
-            }
-            .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
 
-            ScrollView {
-                VStack(spacing: DS.Space.xs) {
-                    ForEach(matches) { OpRow(entry: $0, node: $node) }
-                    if matches.isEmpty {
-                        Text("No API matches “\(query)”.")
-                            .font(.dsCaption).foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(DS.Space.sm)
+            // Closed state: the selected op as one row; click to browse.
+            Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
+                HStack(spacing: DS.Space.sm) {
+                    Text(selected?.name ?? "Choose an operation…").font(.dsLabel)
+                    Text(selected?.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    if let fw = selected?.framework {
+                        Text(fw).font(.dsMicro).foregroundStyle(.dsInfo)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.dsMicro).foregroundStyle(.secondary)
+                }
+                .padding(DS.Space.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help(selected?.summary ?? "Browse the API catalog")
+
+            if expanded {
+                HStack(spacing: DS.Space.sm) {
+                    Image(systemName: "magnifyingglass").font(.dsCaption).foregroundStyle(.tertiary)
+                    TextField("Search APIs — name, symbol, framework…", text: $query)
+                        .textFieldStyle(.plain).font(.dsCaption)
+                }
+                .padding(.horizontal, DS.Space.md).padding(.vertical, DS.Space.sm)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(.dsHairline, lineWidth: 1))
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.Space.xs) {
+                        ForEach(grouped, id: \.framework) { group in
+                            Text(group.framework.uppercased())
+                                .font(.dsMicro.weight(.semibold)).kerning(0.6).foregroundStyle(.tertiary)
+                                .padding(.top, DS.Space.xs)
+                            ForEach(group.entries) { entry in
+                                OpRow(entry: entry, node: $node) {
+                                    withAnimation(.easeInOut(duration: 0.15)) { expanded = false }
+                                }
+                            }
+                        }
+                        if matches.isEmpty && plannedMatches.isEmpty {
+                            Text("No API matches “\(query)”.")
+                                .font(.dsCaption).foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(DS.Space.sm)
+                        }
+                        if !plannedMatches.isEmpty {
+                            DisclosureGroup(isExpanded: $showPlanned) {
+                                VStack(spacing: DS.Space.xs) {
+                                    ForEach(plannedMatches) { OpRow(entry: $0, node: $node) }
+                                }
+                                .padding(.top, DS.Space.xs)
+                            } label: {
+                                HStack(spacing: DS.Space.sm) {
+                                    Text("Planned").font(.dsMicro.weight(.semibold)).kerning(0.6)
+                                    Text("PRD §5.4.1 — not yet executable")
+                                        .font(.dsMicro).foregroundStyle(.tertiary)
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, DS.Space.xs)
+                        }
                     }
                 }
+                .frame(maxHeight: 260)
             }
-            .frame(maxHeight: 230)
         }
         .dsGroup()
     }
@@ -790,6 +887,7 @@ private struct ScriptCommandEditor: View {
 private struct OpRow: View {
     let entry: APICatalogEntry
     @Binding var node: GraphNode
+    var onSelect: (() -> Void)? = nil
 
     private var isSelected: Bool { entry.op != nil && node.hook?.op == entry.op }
     private var selectable: Bool { entry.status == .available && entry.op != nil }
@@ -804,6 +902,7 @@ private struct OpRow: View {
             if (node.hook?.outputVar.isEmpty ?? true) || node.hook?.outputVar == oldDefault {
                 node.hook?.outputVar = op.defaultOutputVar
             }
+            onSelect?()
         } label: {
             VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 HStack(spacing: DS.Space.sm) {

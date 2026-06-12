@@ -31,6 +31,25 @@ enum HookEngine {
         }
     }
 
+    /// What an op's API call returns, typed by `HookOp.returnShape` — the single seam between the
+    /// native call and the string variable lane. `render` is the ONLY serializer: lists go through
+    /// the node's shared OutputProjection; objects emit canonical JSON; ops never pre-format.
+    enum HookValue {
+        case text(String)
+        case list([String])
+        case number(Int)
+        case object(json: String)
+
+        func render(projection: OutputProjection) -> String {
+            switch self {
+            case .text(let s):        return s
+            case .number(let n):      return String(n)
+            case .object(let json):   return json
+            case .list(let items):    return projection.render(items)
+            }
+        }
+    }
+
     /// Run one hook against the context, returning its step result. Writes `outputVar` on success.
     /// Async because a `.script` hook shells out off the main actor; native ops resolve synchronously.
     static func runOne(_ hook: HookDef, context: inout [String: String], defaultInput: String? = nil) async -> HookStep {
@@ -39,6 +58,7 @@ enum HookEngine {
         do {
             let params = resolveParams(hook.params, context)
             let out = try await apply(hook.op, input: input, params: params, context: context)
+                .render(projection: hook.projection)
             if !hook.outputVar.isEmpty { context[hook.outputVar] = out }
             return HookStep(hookID: hook.id, displayName: hook.op.displayName,
                             outputVar: hook.outputVar, output: out, error: nil, ms: millis(since: start))
@@ -77,45 +97,42 @@ enum HookEngine {
         params.mapValues { Vars.substitute($0, context) }
     }
 
-    private static func apply(_ op: HookOp, input: String, params: [String: String], context: [String: String]) async throws -> String {
+    /// The API call itself — returns the typed value (per `HookOp.returnShape`); serialization is
+    /// `HookValue.render`'s job. An op here reads ONLY its declared `paramKeys`.
+    private static func apply(_ op: HookOp, input: String, params: [String: String], context: [String: String]) async throws -> HookValue {
         switch op {
         case .tokenizeWords:
-            let words = tokenize(input, unit: .word, language: params[HookParam.language.rawValue])
-            return formatList(words, style: params[HookParam.format.rawValue] ?? "numbered")
+            return .list(tokenize(input, unit: .word, language: params[HookParam.language.rawValue]))
         case .sentenceSplit:
-            let sentences = tokenize(input, unit: .sentence, language: nil)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            return formatList(sentences, style: params[HookParam.format.rawValue] ?? "numbered")
+            return .list(tokenize(input, unit: .sentence, language: nil)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         case .enrichGloss:
-            return enrich(input, language: params[HookParam.language.rawValue] ?? "")
+            return .list(enrich(input, language: params[HookParam.language.rawValue] ?? ""))
         case .detectLanguage:
-            return LanguageTools.detect(input)?.rawValue ?? "und"
+            return .text(LanguageTools.detect(input)?.rawValue ?? "und")
         case .countTokens:
             // Heuristic estimate. TODO(Xcode 26.4 SDK): route through SystemLanguageModel
             // .tokenCount(for:) behind #available(macOS 26.4, *) — neither that symbol nor
             // contextSize exists in the 26.2 SDK (verified; see the TokenEstimator note).
             let count = TokenEstimator.estimate(input)
-            if (params[HookParam.tokenFormat.rawValue] ?? "count") == "report" {
-                let pct = Double(count) / Double(TokenEstimator.contextWindow) * 100
-                return "≈\(count) tokens · \(String(format: "%.1f", pct))% of the \(TokenEstimator.contextWindow)-token window"
-            }
-            return String(count)
+            let pct = Double(count) / Double(TokenEstimator.contextWindow) * 100
+            return .object(json: #"{"tokens": \#(count), "contextWindow": \#(TokenEstimator.contextWindow), "percentOfWindow": \#(String(format: "%.1f", pct))}"#)
         case .regexExtract:
-            return try regexExtract(input, pattern: params[HookParam.pattern.rawValue] ?? "",
-                                    group: Int(params[HookParam.group.rawValue] ?? "0") ?? 0)
+            return .text(try regexExtract(input, pattern: params[HookParam.pattern.rawValue] ?? "",
+                                          group: Int(params[HookParam.group.rawValue] ?? "0") ?? 0))
         case .regexReplace:
-            return try regexReplace(input, pattern: params[HookParam.pattern.rawValue] ?? "",
-                                    with: params[HookParam.replacement.rawValue] ?? "")
+            return .text(try regexReplace(input, pattern: params[HookParam.pattern.rawValue] ?? "",
+                                          with: params[HookParam.replacement.rawValue] ?? ""))
         case .jsonExtract:
-            return jsonExtract(input, path: params[HookParam.path.rawValue] ?? "")
+            return .text(jsonExtract(input, path: params[HookParam.path.rawValue] ?? ""))
         case .textTransform:
-            return textTransform(input, mode: params[HookParam.mode.rawValue] ?? "trim")
+            return .text(textTransform(input, mode: params[HookParam.mode.rawValue] ?? "trim"))
         case .script:
             let command = params[HookParam.command.rawValue] ?? ""
             guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw HookError.emptyCommand }
             let seconds = Int(params[HookParam.timeout.rawValue] ?? "") ?? 30
-            return try await runHookProcess(command: command, stdin: input, env: context,
-                                            timeout: TimeInterval(max(1, seconds)))
+            return .text(try await runHookProcess(command: command, stdin: input, env: context,
+                                                  timeout: TimeInterval(max(1, seconds))))
         }
     }
 
@@ -198,26 +215,19 @@ enum HookEngine {
         return tok.tokens(for: text.startIndex..<text.endIndex).map { String(text[$0]) }
     }
 
-    /// Deterministic per-word enrichment (surface · POS · lemma · [reading]) via the shared pipeline.
-    private static func enrich(_ text: String, language: String) -> String {
-        LanguageTools.enrich(text, language: language).enumerated().map { i, t in
-            var parts = ["\(i + 1). \(t.surface)"]
+    /// Deterministic per-word enrichment (surface · POS · lemma · [reading]) via the shared
+    /// pipeline — one list item per word; numbering/joining is the projection's job.
+    private static func enrich(_ text: String, language: String) -> [String] {
+        LanguageTools.enrich(text, language: language).map { t in
+            var parts = [t.surface]
             if let p = t.pos { parts.append(p) }
             if let l = t.lemma, l.lowercased() != t.surface.lowercased() { parts.append("lemma: \(l)") }
             if let r = t.romanization { parts.append("[\(r)]") }
             return parts.joined(separator: "  ·  ")
-        }.joined(separator: "\n")
+        }
     }
 
     // MARK: - Text / JSON ops
-
-    private static func formatList(_ items: [String], style: String) -> String {
-        switch style {
-        case "comma": return items.joined(separator: ", ")
-        case "lines": return items.joined(separator: "\n")
-        default:      return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        }
-    }
 
     private static func regexExtract(_ input: String, pattern: String, group: Int) throws -> String {
         guard !pattern.isEmpty else { return "" }

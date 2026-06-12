@@ -22,14 +22,20 @@ import Foundation
 // MARK: - Model
 
 /// One argument of an underlying API call, mapped to the GUI control / wire that feeds it.
+/// `param`/`fromInput` are the STRUCTURED link (drives the inline field captions); `source` is
+/// the human-readable phrasing of the same fact for the mapping panel — never parsed.
 struct APIArgument: Identifiable {
-    let name: String      // Swift argument label, e.g. "unit"
-    let type: String      // e.g. "NLTokenUnit"
-    let source: String    // what feeds it, e.g. "fixed — .word", "“language” param", "input wire"
+    let name: String            // Swift argument label, e.g. "unit"
+    let type: String            // e.g. "NLTokenUnit"
+    let source: String          // prose: what feeds it, e.g. "fixed — .word", "“language” param"
+    let param: HookParam?       // the param field that feeds this argument, if any
+    let fromInput: Bool         // true ⇒ fed by the input wire (the node's in var)
     var id: String { name + source }
 
-    init(_ name: String, _ type: String, _ source: String) {
+    init(_ name: String, _ type: String, _ source: String,
+         param: HookParam? = nil, fromInput: Bool = false) {
         self.name = name; self.type = type; self.source = source
+        self.param = param; self.fromInput = fromInput
     }
 }
 
@@ -100,10 +106,10 @@ enum APICatalog {
                 signature: "init(unit:) · setLanguage(_:) · tokens(for:)",
                 args: [
                     APIArgument("unit", "NLTokenUnit", "fixed — .word"),
-                    APIArgument("setLanguage", "NLLanguage", "“language” param (name or code; empty = auto)"),
-                    APIArgument("string", "String", "input wire (in var)"),
+                    APIArgument("setLanguage", "NLLanguage", "“language” param (name or code; empty = auto)", param: .language),
+                    APIArgument("string", "String", "input wire (in var)", fromInput: true),
                 ],
-                returns: "[Range<String.Index>] → formatted via “format” param (numbered | lines | comma)",
+                returns: "[Range<String.Index>] → word list, serialized by the node's “Output as” projection",
                 docPath: "naturallanguage/nltokenizer")],
             keywords: ["segment", "word", "split", "cjk"]),
 
@@ -117,9 +123,9 @@ enum APICatalog {
                 signature: "init(unit:) · tokens(for:)",
                 args: [
                     APIArgument("unit", "NLTokenUnit", "fixed — .sentence"),
-                    APIArgument("string", "String", "input wire (in var)"),
+                    APIArgument("string", "String", "input wire (in var)", fromInput: true),
                 ],
-                returns: "[Range<String.Index>] → formatted via “format” param",
+                returns: "[Range<String.Index>] → sentence list, serialized by the node's “Output as” projection",
                 docPath: "naturallanguage/nltokenizer")],
             keywords: ["sentence", "split", "segment"]),
 
@@ -131,7 +137,7 @@ enum APICatalog {
             calls: [APICall(
                 symbol: "NLLanguageRecognizer",
                 signature: "processString(_:) · dominantLanguage",
-                args: [APIArgument("string", "String", "input wire (in var)")],
+                args: [APIArgument("string", "String", "input wire (in var)", fromInput: true)],
                 returns: "NLLanguage? → its rawValue (or “und”)",
                 docPath: "naturallanguage/nllanguagerecognizer")],
             keywords: ["language", "detect", "recognizer", "locale"]),
@@ -145,14 +151,14 @@ enum APICatalog {
                 APICall(symbol: "NLTagger",
                         signature: "init(tagSchemes: [.lexicalClass, .lemma]) · tag(at:unit:scheme:)",
                         args: [
-                            APIArgument("string", "String", "input wire (in var)"),
-                            APIArgument("setLanguage", "NLLanguage", "“language” param"),
+                            APIArgument("string", "String", "input wire (in var)", fromInput: true),
+                            APIArgument("setLanguage", "NLLanguage", "“language” param", param: .language),
                         ],
                         returns: "POS + lemma per word (nil for untagged languages, e.g. CJK)",
                         docPath: "naturallanguage/nltagger"),
                 APICall(symbol: "CFStringTokenizer",
                         signature: "kCFStringTokenizerAttributeLatinTranscription",
-                        args: [APIArgument("locale", "CFLocale", "“language” param")],
+                        args: [APIArgument("locale", "CFLocale", "“language” param", param: .language)],
                         returns: "romaja / pinyin / romaji reading (non-Latin scripts)",
                         docPath: "corefoundation/cfstringtokenizer-rf8"),
             ],
@@ -161,13 +167,13 @@ enum APICatalog {
         APICatalogEntry(
             op: .countTokens, plannedKey: nil, name: "Count tokens",
             framework: "FoundationModels",
-            summary: "Token count of the input + its share of the model's context window. Heuristic estimate on this SDK; routes through the native 26.4 API when the SDK ships it.",
+            summary: "Token count of the input + its share of the model's context window, as JSON {tokens, contextWindow, percentOfWindow}. Heuristic estimate on this SDK; routes through the native 26.4 API when the SDK ships it.",
             status: .available, portability: .universal,
             calls: [
                 APICall(symbol: "SystemLanguageModel",
                         signature: "tokenCount(for:) async throws -> Int · contextSize",
-                        args: [APIArgument("for", "String", "input wire (in var)")],
-                        returns: "Int — “format” param: count (number only) | report (≈tokens · % of window)",
+                        args: [APIArgument("for", "String", "input wire (in var)", fromInput: true)],
+                        returns: "Int → JSON {tokens, contextWindow, percentOfWindow} (chain JSON extract for one field)",
                         docPath: "foundationmodels/systemlanguagemodel",
                         note: "macOS 26.4 (back-deployed). The 26.2 SDK this app builds with exposes neither symbol (verified against its swiftinterface), so the op currently uses TokenEstimator: CJK ≈ 1 tok/char, else ≈ 1 tok/4 chars, vs the 4,096-token on-device window."),
             ],
@@ -182,9 +188,9 @@ enum APICatalog {
                 symbol: "NSRegularExpression",
                 signature: "init(pattern:) · firstMatch(in:range:)",
                 args: [
-                    APIArgument("pattern", "String", "“pattern” param"),
-                    APIArgument("in", "String", "input wire (in var)"),
-                    APIArgument("range(at:)", "Int", "“group” param (0 = whole match)"),
+                    APIArgument("pattern", "String", "“pattern” param", param: .pattern),
+                    APIArgument("in", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("range(at:)", "Int", "“group” param (0 = whole match)", param: .group),
                 ],
                 returns: "String — the matched text",
                 docPath: "foundation/nsregularexpression")],
@@ -199,9 +205,9 @@ enum APICatalog {
                 symbol: "NSRegularExpression",
                 signature: "init(pattern:) · stringByReplacingMatches(in:range:withTemplate:)",
                 args: [
-                    APIArgument("pattern", "String", "“pattern” param"),
-                    APIArgument("in", "String", "input wire (in var)"),
-                    APIArgument("withTemplate", "String", "“replace” param ($1 = capture group)"),
+                    APIArgument("pattern", "String", "“pattern” param", param: .pattern),
+                    APIArgument("in", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("withTemplate", "String", "“replace” param ($1 = capture group)", param: .replacement),
                 ],
                 returns: "String",
                 docPath: "foundation/nsregularexpression")],
@@ -216,8 +222,8 @@ enum APICatalog {
                 symbol: "JSONSerialization",
                 signature: "jsonObject(with:options:)",
                 args: [
-                    APIArgument("with", "Data", "input wire (in var)"),
-                    APIArgument("path walk", "String", "“path” param, e.g. words.0.surface"),
+                    APIArgument("with", "Data", "input wire (in var)", fromInput: true),
+                    APIArgument("path walk", "String", "“path” param, e.g. words.0.surface", param: .path),
                 ],
                 returns: "String — the scalar at the path",
                 docPath: "foundation/jsonserialization")],
@@ -232,8 +238,8 @@ enum APICatalog {
                 symbol: "String",
                 signature: "trimmingCharacters(in:) · lowercased() · uppercased()",
                 args: [
-                    APIArgument("self", "String", "input wire (in var)"),
-                    APIArgument("mode", "String", "“mode” param: trim | lower | upper | trimlines"),
+                    APIArgument("self", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("mode", "String", "“mode” picker: trim | lower | upper | trimlines", param: .mode),
                 ],
                 returns: "String",
                 docPath: "swift/string")],
@@ -248,10 +254,10 @@ enum APICatalog {
                 symbol: "Process",
                 signature: "executableURL = /bin/zsh · arguments = [\"-c\", command] · run()",
                 args: [
-                    APIArgument("command", "String", "“command” param (the shell line)"),
-                    APIArgument("standardInput", "Pipe", "input wire (in var) → stdin"),
+                    APIArgument("command", "String", "“command” param (the shell line)", param: .command),
+                    APIArgument("standardInput", "Pipe", "input wire (in var) → stdin", fromInput: true),
                     APIArgument("environment", "[String: String]", "every context var as PP_<NAME>"),
-                    APIArgument("timeout", "TimeInterval", "“timeout” param (seconds, default 30)"),
+                    APIArgument("timeout", "TimeInterval", "“timeout” param (seconds, default 30)", param: .timeout),
                 ],
                 returns: "trimmed stdout → out var (non-zero exit / timeout ⇒ stage error with stderr)",
                 docPath: "foundation/process")],
@@ -449,12 +455,12 @@ extension APICatalog {
     }
 
     /// Inline label-line annotation for a Hook/Native-API *param field*: the exact official
-    /// argument the param feeds, e.g. "NLTokenizer.setLanguage : NLLanguage". nil when the param
-    /// is node plumbing (output formatting) rather than an API argument — the caller says so.
-    static func argAnnotation(op: HookOp, paramLabel: String) -> String? {
+    /// argument the param feeds, e.g. "NLTokenizer.setLanguage : NLLanguage" — resolved via the
+    /// structured `APIArgument.param` link (never by parsing prose).
+    static func argAnnotation(op: HookOp, param: HookParam) -> String? {
         guard let entry = entry(for: op) else { return nil }
         for call in entry.calls {
-            if let arg = call.args.first(where: { $0.source.contains("“\(paramLabel)” param") }) {
+            if let arg = call.args.first(where: { $0.param == param }) {
                 return "\(call.symbol).\(arg.name) : \(arg.type)"
             }
         }
@@ -465,7 +471,7 @@ extension APICatalog {
     static func inputAnnotation(op: HookOp) -> String? {
         guard let entry = entry(for: op) else { return nil }
         for call in entry.calls {
-            if let arg = call.args.first(where: { $0.source.contains("input wire") }) {
+            if let arg = call.args.first(where: { $0.fromInput }) {
                 return "\(call.symbol).\(arg.name) : \(arg.type)"
             }
         }
