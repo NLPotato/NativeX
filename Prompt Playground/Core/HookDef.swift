@@ -190,6 +190,22 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         default:                                           return .text
         }
     }
+
+    /// A concrete sample of what this op writes into its output var, rendered through the live
+    /// projection — shown in the inspector so the output is never a black box. nil when the shape
+    /// depends entirely on the user's pattern/path/script (no honest sample exists).
+    func outputPreview(projection: OutputProjection) -> String? {
+        switch self {
+        case .tokenizeWords:  return projection.render(["Der", "Hund", "schläft"])
+        case .sentenceSplit:  return projection.render(["Der Hund schläft.", "Die Katze wacht."])
+        case .enrichGloss:    return projection.render(["Der  ·  Determiner  ·  lemma: der",
+                                                        "schläft  ·  Verb  ·  lemma: schlafen  ·  [shlayft]"])
+        case .detectLanguage: return "de"
+        case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
+        case .regexExtract, .regexReplace, .jsonExtract, .textTransform, .script:
+            return nil
+        }
+    }
     /// A sensible default `outputVar` when the op is first added.
     var defaultOutputVar: String {
         switch self {

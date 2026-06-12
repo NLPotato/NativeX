@@ -138,8 +138,10 @@ extension View {
 
 /// The one labeled-field component: label + control + (help | error). See design.md §4.1.
 /// `api` is the inline official-API annotation (UX-First §4.2): the exact Swift symbol/argument
-/// this control feeds, rendered as a micro-mono suffix on the label line — so a developer learns
-/// the underlying API at the point of interaction and can predict the code their settings produce.
+/// this control feeds — so a developer learns the underlying API at the point of interaction and
+/// can predict the code their settings produce. The caption is ALWAYS its own line under the
+/// label (wrapping, never truncated): the inspector pane is narrow by nature, and a clipped
+/// annotation teaches nothing.
 struct DSField<Control: View>: View {
     let label: String
     var api: String? = nil
@@ -149,11 +151,11 @@ struct DSField<Control: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: DS.Space.sm) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 Text(label).font(.dsLabel).foregroundStyle(.secondary)
                 if let api {
                     Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
             }
             control()

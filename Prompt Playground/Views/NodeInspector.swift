@@ -636,8 +636,9 @@ private struct HookEditor: View {
                 // which arguments exist (and how each renders), returnShape says whether the one
                 // shared "Output as" projection applies. No per-op UI code (UX-First §4.2).
                 let op = node.hook?.op ?? .textTransform
-                DSField(label: "in (input var)",
-                        api: APICatalog.inputAnnotation(op: op)) {
+                DSField(label: "Input",
+                        api: APICatalog.inputAnnotation(op: op),
+                        help: "The {{var}} whose value feeds the call.") {
                     TextField("input", text: h.inputVar).dsTextField()
                 }
                 ForEach(op.paramKeys, id: \.self) { param in
@@ -671,30 +672,41 @@ private struct HookEditor: View {
         }
     }
 
-    /// The serialization boundary, shared by every op: where the return value lands ({{out var}})
-    /// and — for list-shaped returns only — the one projection control. Object-shaped returns
-    /// state their canonical JSON contract instead of offering bespoke formats.
+    /// The serialization boundary, shared by every op: where the return value lands ({{out var}}),
+    /// the one projection control for list-shaped returns, and a CONCRETE example of the output —
+    /// the result is never a black box (UX-First §4.2).
     @ViewBuilder private func outputSection(_ h: Binding<HookDef>, op: HookOp) -> some View {
+        let projection = node.hook?.projection ?? .numbered
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            DSField(label: "out (output var)",
-                    api: "node plumbing — names the {{var}} carrying the result") {
+            DSField(label: "Output",
+                    api: "→ {{\(currentOutputVar(op))}}") {
                 TextField("output", text: h.outputVar).dsTextField()
             }
-            switch op.returnShape {
-            case .list:
-                DSField(label: "Output as",
-                        api: "node plumbing — [String] → {{\(currentOutputVar(op))}}") {
+            if case .list = op.returnShape {
+                DSField(label: "Output as") {
                     Picker("", selection: projectionBinding) {
                         ForEach(OutputProjection.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden()
                 }
-            case .object:
-                Label("Emits canonical JSON — chain a JSON extract node to pull one field.",
+            }
+            if let preview = op.outputPreview(projection: projection) {
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    Text("Example output").font(.dsMicro.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(preview)
+                        .font(.dsCodeMicro).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DS.Space.sm)
+                        .codeSurface()
+                }
+            }
+            if case .object = op.returnShape {
+                Label("Canonical JSON — chain a JSON extract node to pull one field.",
                       systemImage: "curlybraces")
                     .font(.dsMicro).foregroundStyle(.tertiary)
-            case .text, .number:
-                EmptyView()
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .dsGroup()
@@ -753,15 +765,20 @@ private struct OpCatalogPicker: View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             DSSectionHeader("Operation")
 
-            // Closed state: the selected op as one row; click to browse.
+            // Closed state: the selected op as one row (title line + symbol·framework line — the
+            // narrow pane never wraps mid-word); click to browse.
             Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
-                HStack(spacing: DS.Space.sm) {
-                    Text(selected?.name ?? "Choose an operation…").font(.dsLabel)
-                    Text(selected?.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
-                    Spacer(minLength: 0)
-                    if let fw = selected?.framework {
-                        Text(fw).font(.dsMicro).foregroundStyle(.dsInfo)
+                HStack(alignment: .top, spacing: DS.Space.sm) {
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                        Text(selected?.name ?? "Choose an operation…").font(.dsLabel)
+                        HStack(spacing: DS.Space.sm) {
+                            Text(selected?.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
+                            if let fw = selected?.framework {
+                                Text(fw).font(.dsMicro).foregroundStyle(.dsInfo)
+                            }
+                        }
                     }
+                    Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.dsMicro).foregroundStyle(.secondary)
                 }
@@ -908,7 +925,6 @@ private struct OpRow: View {
                 HStack(spacing: DS.Space.sm) {
                     Text(entry.name).font(.dsLabel)
                         .foregroundStyle(selectable ? Color.primary : Color.secondary)
-                    Text(entry.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                     if entry.status == .planned {
                         Text("planned").dsBadge(.secondary)
@@ -917,9 +933,11 @@ private struct OpRow: View {
                     }
                 }
                 HStack(spacing: DS.Space.sm) {
+                    Text(entry.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
                     Text(entry.framework).font(.dsMicro).foregroundStyle(.dsInfo)
-                    Text(entry.summary).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(1)
                 }
+                Text(entry.summary).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(DS.Space.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
