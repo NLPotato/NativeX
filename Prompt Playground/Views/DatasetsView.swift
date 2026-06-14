@@ -279,7 +279,7 @@ private struct NewDatasetSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
                 Text("New dataset").font(.dsTitle)
                 Text("A named set of test cases for one task. Run it in the Lab tab.")
                     .font(.dsBody).foregroundStyle(.secondary)
@@ -384,7 +384,7 @@ struct ExampleEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
                 Text(isEditing ? "Edit example" : "New example").font(.dsTitle)
                 Text("\(task.label) test case — the input a Lab experiment runs against.")
                     .font(.dsBody).foregroundStyle(.secondary)

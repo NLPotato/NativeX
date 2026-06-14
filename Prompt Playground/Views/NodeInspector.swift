@@ -72,15 +72,19 @@ struct NodeInspector: View {
     private func header(_ node: Binding<GraphNode>) -> some View {
         HStack(spacing: DS.Space.sm) {
             Image(systemName: node.wrappedValue.kind.symbol).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            // Editable title gets breathing room from the metadata captions below it; the caption
+            // lines stay tightly grouped as one unit (an editable field flush against text reads broken).
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
                 TextField("Title", text: node.title).dsTextField()
-                HStack(spacing: DS.Space.sm) {
-                    Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
-                    PortabilityBadge(portability: inspectorPortability, showLabel: true, chip: true)   // §6.2
-                }
-                .lineLimit(1)
-                if let api = node.wrappedValue.apiName {   // official API name, full width — never truncated (§6.1)
-                    Text(api).font(.dsCode).foregroundStyle(.tertiary).lineLimit(1)
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                    HStack(spacing: DS.Space.sm) {
+                        Text(node.wrappedValue.kind.label).font(.dsMicro).foregroundStyle(.secondary)
+                        PortabilityBadge(portability: inspectorPortability, showLabel: true, chip: true)   // §6.2
+                    }
+                    .lineLimit(1)
+                    if let api = node.wrappedValue.apiName {   // official API name, full width — never truncated (§6.1)
+                        Text(api).font(.dsCode).foregroundStyle(.tertiary).lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 0)
