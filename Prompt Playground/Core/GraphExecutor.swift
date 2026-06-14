@@ -32,9 +32,16 @@
 
 import Foundation
 import FoundationModels
+import os
 
 @MainActor
 enum GraphExecutor {
+
+    /// Signposts each node's execution so a user can profile a graph run in Instruments (Points of
+    /// Interest / os_signpost) — the workbench's "execution tracing" carried down to the OS profiler.
+    /// Disabled signposts compile to no-ops; harmless and identical on iOS.
+    private static let signposter = OSSignposter(
+        logHandle: OSLog(subsystem: "com.nativex.promptplayground", category: .pointsOfInterest))
 
     // MARK: Errors
 
@@ -112,6 +119,8 @@ enum GraphExecutor {
             var run = GraphNodeRun(nodeID: id, status: .running)
             onUpdate?(run)
             let start = Date()
+            let spState = signposter.beginInterval("node", id: signposter.makeSignpostID(),
+                                                   "\(node.kind.label, privacy: .public) · \(node.apiName ?? "", privacy: .public)")
             do {
                 let exec = try await execute(node, graph: graph, outputs: result.outputs,
                                              transcripts: result.transcripts, row: row)
@@ -122,6 +131,7 @@ enum GraphExecutor {
                 run.status = .error
                 run.error = error.localizedDescription
             }
+            signposter.endInterval("node", spState, "\(run.status == .ok ? "ok" : "error", privacy: .public)")
             run.ms = Int(Date().timeIntervalSince(start) * 1000)
             result.outputs[id] = run.outputs
             if let t = run.transcript { result.transcripts[id] = t }
