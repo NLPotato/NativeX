@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NativeX Desktop — Critical Review (2026-06-15)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0b0d0c; --bg2:#111413; --bg3:#171b19; --raised:#1b201d;
+    --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.055);
+    --tx:#e9efe9; --tx2:#9da7a0; --tx3:#6b756e;
+    --lime:#b6f23a; --teal:#54d6c0;
+    --red:#ff6b6b; --amber:#ffb24d; --yellow:#f0d752; --good:#5fd98a; --blue:#6aa6ff;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --maxw:1000px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--tx);
+    font-family:var(--sans); font-size:16px; line-height:1.65; letter-spacing:.1px;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(900px 500px at 78% -8%, rgba(84,214,192,.10), transparent 60%),
+      radial-gradient(800px 480px at 8% 4%, rgba(182,242,58,.07), transparent 55%),
+      linear-gradient(var(--line2) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line2) 1px, transparent 1px);
+    background-size:auto,auto,46px 46px,46px 46px;
+    background-position:0 0,0 0,-1px -1px,-1px -1px;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:56px 28px 96px}
+  .kick{font-family:var(--mono); font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--teal); margin:0 0 14px}
+  h1{font-size:clamp(30px,5vw,46px); line-height:1.04; font-weight:700; letter-spacing:-.5px; margin:0 0 16px}
+  h1 .mut{color:var(--tx3); font-weight:600}
+  h2{font-size:23px; font-weight:600; letter-spacing:-.2px; margin:0 0 6px}
+  h3{font-size:16px; font-weight:600; margin:0}
+  p{margin:0 0 14px}
+  a{color:var(--teal); text-decoration:none; border-bottom:1px solid rgba(84,214,192,.35)}
+  .lede{font-size:18px; color:var(--tx2); max-width:74ch}
+  .meta{display:flex; flex-wrap:wrap; gap:10px 22px; margin:26px 0 0; font-family:var(--mono); font-size:12.5px; color:var(--tx2)}
+  .meta b{color:var(--tx); font-weight:500}
+  .sect{margin-top:64px; opacity:0; transform:translateY(14px); animation:rise .6s cubic-bezier(.2,.7,.3,1) forwards}
+  @keyframes rise{to{opacity:1; transform:none}}
+  @media (prefers-reduced-motion:reduce){.sect{animation:none; opacity:1; transform:none}}
+  .seclabel{font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--tx3); margin:0 0 18px; padding-bottom:10px; border-bottom:1px solid var(--line)}
+  .seclabel .n{color:var(--lime)}
+
+  .verdict{background:linear-gradient(180deg,var(--bg3),var(--bg2)); border:1px solid var(--line); border-left:3px solid var(--lime); border-radius:14px; padding:26px 28px}
+  .verdict h2{margin-bottom:10px}
+  .verdict p{color:var(--tx2); margin-bottom:0}
+  .verdict .tag{display:inline-block; font-family:var(--mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--lime); border:1px solid rgba(182,242,58,.4); border-radius:999px; padding:3px 12px; margin-bottom:16px}
+
+  .scorebar{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:22px}
+  .stat{background:var(--bg2); border:1px solid var(--line); border-radius:12px; padding:16px 18px}
+  .stat .v{font-size:30px; font-weight:600; font-family:var(--mono); letter-spacing:-1px; line-height:1}
+  .stat .l{font-size:12.5px; color:var(--tx2); margin-top:8px}
+  .stat.red .v{color:var(--red)} .stat.amber .v{color:var(--amber)} .stat.yellow .v{color:var(--yellow)}
+  .stat.good .v{color:var(--good)} .stat.teal .v{color:var(--teal)}
+
+  .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px}
+  .card{background:var(--bg2); border:1px solid var(--line); border-radius:13px; padding:20px 22px}
+  .card.str{border-left:3px solid var(--teal)}
+  .card.str h3{margin-bottom:7px}
+  .card.str p{color:var(--tx2); font-size:14.5px; margin-bottom:0}
+  .card .ev{font-family:var(--mono); font-size:12px; color:var(--tx3); margin-top:10px}
+
+  .finding{background:var(--bg2); border:1px solid var(--line); border-radius:14px; padding:0; overflow:hidden; margin-bottom:16px}
+  .finding .rail{height:3px}
+  .fhead{display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:18px 22px 0}
+  .fid{font-family:var(--mono); font-size:13px; font-weight:600; color:var(--tx3)}
+  .ftitle{font-size:17px; font-weight:600; flex:1; min-width:200px}
+  .pill{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; padding:3px 10px; border-radius:999px; border:1px solid currentColor; white-space:nowrap}
+  .sev-high{color:var(--red)} .sev-med{color:var(--amber)} .sev-low{color:var(--yellow)} .sev-info{color:var(--blue)}
+  .st-fixed{color:var(--good)} .st-prog{color:var(--teal)} .st-defer{color:var(--tx2)} .st-conf{color:var(--red)}
+  .fbody{padding:14px 22px 22px}
+  .fbody p{font-size:15px; color:var(--tx2); margin-bottom:12px}
+  .fbody p:last-child{margin-bottom:0}
+  .fbody .lab{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--tx3); display:block; margin-bottom:6px}
+  code,.chip{font-family:var(--mono)}
+  code{font-size:13px; background:var(--bg3); border:1px solid var(--line2); border-radius:5px; padding:1px 6px; color:#cfe9c8}
+  .chips{display:flex; flex-wrap:wrap; gap:7px; margin:2px 0 4px}
+  .chip{font-size:12px; background:var(--bg3); border:1px solid var(--line); border-radius:6px; padding:4px 9px; color:var(--tx2)}
+  .chip b{color:var(--teal); font-weight:500}
+  .fix{border-left:3px solid var(--good); background:rgba(95,217,138,.06); border-radius:0 9px 9px 0; padding:12px 16px; margin-top:14px}
+  .fix .lab{color:var(--good)}
+  .fix p{color:var(--tx); margin-bottom:0; font-size:14.5px}
+  .rec{border-left:3px solid var(--blue); background:rgba(106,166,255,.06); border-radius:0 9px 9px 0; padding:12px 16px; margin-top:14px}
+  .rec .lab{color:var(--blue)}
+
+  .correct{background:var(--bg2); border:1px solid var(--line); border-left:3px solid var(--good); border-radius:13px; padding:18px 22px; margin-bottom:14px}
+  .correct h3{color:var(--good); font-size:15px; margin-bottom:8px; display:flex; align-items:center; gap:9px}
+  .correct h3 .x{font-family:var(--mono); font-size:12px; color:var(--good); border:1px solid var(--good); border-radius:6px; padding:2px 8px}
+  .correct p{font-size:14.5px; color:var(--tx2); margin-bottom:0}
+
+  .log{border:1px solid var(--line); border-radius:13px; overflow:hidden}
+  .logrow{display:grid; grid-template-columns:46px 1fr auto; gap:14px; align-items:start; padding:16px 20px; border-bottom:1px solid var(--line2); background:var(--bg2)}
+  .logrow:last-child{border-bottom:0}
+  .logrow .lid{font-family:var(--mono); font-weight:600; color:var(--lime); font-size:15px}
+  .logrow .lmsg{font-family:var(--mono); font-size:13.5px; color:var(--tx); line-height:1.5}
+  .logrow .lmsg .files{color:var(--tx3); font-size:12px}
+  .logrow .lmsg .got{display:block; color:var(--tx2); font-size:12.5px; font-family:var(--sans); margin-top:7px}
+  .logrow .lmsg .got b{color:var(--amber); font-weight:500}
+  .logrow .lstat{justify-self:end; text-align:right}
+  ul.clean{margin:0; padding-left:20px; color:var(--tx2)}
+  ul.clean li{margin-bottom:9px; font-size:15px}
+  ul.clean li b{color:var(--tx); font-weight:500}
+  .foot{margin-top:70px; padding-top:22px; border-top:1px solid var(--line); font-family:var(--mono); font-size:12px; color:var(--tx3); display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px}
+  .note{font-size:13.5px; color:var(--tx3); font-style:italic}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="sect" style="animation-delay:.02s">
+    <p class="kick">Critical Review · Fresh-eyes pass</p>
+    <h1>NativeX Desktop <span class="mut">— a senior LLM&nbsp;Ops engineer's read</span></h1>
+    <p class="lede">An adoption-grade critique of the on-device Foundation Models workbench: what's genuinely strong, where the spec out-runs the code, the interaction friction — and the fixes shipped on this branch.</p>
+    <div class="meta">
+      <span>Reviewer&nbsp; <b>LLM&nbsp;Ops (fresh user)</b></span>
+      <span>Date&nbsp; <b>2026-06-15</b></span>
+      <span>Branch&nbsp; <b>fix/ux-review-followups</b></span>
+      <span>Build&nbsp; <b style="color:var(--good)">macOS · Debug ✓</b></span>
+      <span>Method&nbsp; <b>live UI + source</b></span>
+    </div>
+  </header>
+
+  <section class="sect" style="animation-delay:.08s; margin-top:40px">
+    <div class="verdict">
+      <span class="tag">Verdict</span>
+      <h2>Strong, coherent product. One headline overclaim. A handful of fixable rough edges.</h2>
+      <p>This is a real, well-architected workbench — not a demo. It runs live on-device <code>LanguageModelSession</code> calls with the best run-feedback I've seen in a node editor, a genuinely novel API-teaching inspector, and a working LLM-as-judge. The one substantive pitch-vs-product gap is <b style="color:var(--tx)">cross-provider benchmarking</b>, which the spec sells as current but the code does not implement. Notably, two items from my first-pass notes turned out to be <b style="color:var(--tx)">already solved</b> on close inspection — I've corrected them rather than ship a wrong critique. Net: keep the engineering, reconcile the one claim, and the UX bugs below are mostly closed already.</p>
+    </div>
+    <div class="scorebar">
+      <div class="stat red"><div class="v">1</div><div class="l">Headline pitch-vs-product gap (cross-provider)</div></div>
+      <div class="stat amber"><div class="v">2</div><div class="l">UX/interaction bugs (both fixed)</div></div>
+      <div class="stat good"><div class="v">5</div><div class="l">Fixes shipped on this branch</div></div>
+      <div class="stat teal"><div class="v">2</div><div class="l">First-pass claims corrected on re-verify</div></div>
+    </div>
+  </section>
+
+  <section class="sect" style="animation-delay:.12s">
+    <p class="seclabel"><span class="n">00</span> &nbsp;Method &amp; integrity</p>
+    <div class="card" style="border-left:3px solid var(--teal)">
+      <p style="color:var(--tx2); margin-bottom:12px">I drove the <b style="color:var(--tx)">Playground tab live</b> — canvas, inspector, and a full on-device run (German-tutor graph) — and <b style="color:var(--tx)">code-grounded</b> the Datasets, Lab, Run History and Schema-editor tabs, which I couldn't reach via synthetic clicks (the window's unified title-bar swallows automated clicks in the tab strip — an automation ceiling, not an app defect).</p>
+      <p style="color:var(--tx2); margin-bottom:0">Before publishing, I <b style="color:var(--tx)">re-verified every claim against the current branch</b>. That caught two first-pass errors (see <a href="#corrections">Corrections</a>) — exactly the kind of stale criticism that shouldn't reach a team doc. The findings below are what survived verification.</p>
+    </div>
+  </section>
+
+  <section class="sect" style="animation-delay:.16s">
+    <p class="seclabel"><span class="n">01</span> &nbsp;What's genuinely strong</p>
+    <div class="grid2">
+      <div class="card str">
+        <h3>The API-teaching inspector</h3>
+        <p>Op catalog grouped by framework, an <b style="color:var(--tx)">iOS&nbsp;·&nbsp;macOS portability badge</b>, and the title↔symbol duality (friendly name + exact Swift API). Nothing else in the FM-tooling space teaches the underlying API at the point of use like this.</p>
+        <div class="ev">Core/APICatalog.swift · Views/NodeInspector.swift</div>
+      </div>
+      <div class="card str">
+        <h3>Live execution feedback</h3>
+        <p>A top-center "running" pill, a cascade of green ✓ checks onto finished nodes, ambient canvas radiance, and the active FM node glowing. The canvas <i>is</i> the debugger — and it's polished.</p>
+        <div class="ev">Views/GraphCanvas.swift</div>
+      </div>
+      <div class="card str">
+        <h3>Real on-device pipeline + judge</h3>
+        <p>The executor streams from a live default-model session; the LLM-as-judge is a real guided-generation scorer with judge-vs-human agreement; reference eval is wired end-to-end.</p>
+        <div class="ev">Core/GraphExecutor.swift:311 · Core/Judge.swift · Core/Pipeline.swift</div>
+      </div>
+      <div class="card str">
+        <h3>Honest token accounting</h3>
+        <p>Version-gated and labeled: exact via <code>response.usage</code> on macOS&nbsp;26.4+, clearly-marked heuristic estimates before. This is a <b style="color:var(--tx)">strength</b>, not a flaw (see Corrections).</p>
+        <div class="ev">Core/PlaygroundCore.swift · PRD §5.8 / §6.3</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" style="animation-delay:.2s">
+    <p class="seclabel"><span class="n">02</span> &nbsp;Findings</p>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--red)"></div>
+      <div class="fhead">
+        <span class="fid">F1</span>
+        <span class="ftitle">Cross-provider benchmarking is pitched as current, but absent in code</span>
+        <span class="pill sev-high">High</span>
+        <span class="pill st-conf">Confirmed</span>
+      </div>
+      <div class="fbody">
+        <p>The PRD repeatedly sells routing one graph across on-device → Private Cloud Compute → Claude → Gemini "to benchmark cross-provider quality and latency from one canvas," as a present capability. The code does none of it.</p>
+        <span class="lab">Evidence</span>
+        <div class="chips">
+          <span class="chip"><b>GenConfig</b> — only on-device GenerationOptions fields; no backend/provider</span>
+          <span class="chip"><b>3×</b> LanguageModelSession sites → default on-device model</span>
+          <span class="chip">GraphExecutor.swift:311 · Runners.swift:92 · Judge.swift:54</span>
+          <span class="chip"><b>0</b> refs to Claude/Gemini/PCC/provider in Core·Views·Models·Engines</span>
+          <span class="chip">PRD §1.2 · §4.3 · §5.2 · §5.5 — not in roadmap §8</span>
+        </div>
+        <p>Note: PRD §1.1's framework-level statement (Apple's <code>LanguageModel</code> protocol is open) is accurate background — the gap is the <i>product-level</i> claims that NativeX does this today.</p>
+        <div class="rec">
+          <span class="lab">Decision needed (product)</span>
+          <p>Either <b style="color:var(--tx)">build</b> a backend selector on the FM node — start with on-device ↔ PCC, both Apple-native and low-lift — <b style="color:var(--tx)">or</b> own the on-device-first scope cleanly. Building the full provider matrix is a feature, not a fix, so it's out of scope for this pass.</p>
+        </div>
+        <div class="fix">
+          <span class="lab">Shipped (conservative, reversible)</span>
+          <p>Reconciled the spec: a dated status note at the top of the PRD, an inline "(planned)" marker on the FM-node spec §5.2, and a new roadmap entry §8.7. This does <b>not</b> build the feature — it stops the doc from overclaiming until you decide.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--amber)"></div>
+      <div class="fhead">
+        <span class="fid">F2</span>
+        <span class="ftitle">A run's result card can render off-screen and be unreachable</span>
+        <span class="pill sev-med">Medium</span>
+        <span class="pill st-prog" data-status>In progress</span>
+      </div>
+      <div class="fbody">
+        <p>Live-observed: I ran a graph and could not see its output. The single-run result card is placed to the right of the terminal FM node — usually the right-most node — so it overflows past all content, and Fit-to-view framed only the nodes, not the card.</p>
+        <span class="lab">Evidence</span>
+        <div class="chips">
+          <span class="chip">card offset <b>f.maxX + 28</b> → right of the terminal FM</span>
+          <span class="chip"><b>fitToView()</b> unioned only node/group rects — GraphEngine.swift:540</span>
+        </div>
+        <div class="fix">
+          <span class="lab">Shipped</span>
+          <p>Introduced <code>engine.resultCardRect</code> as the single source of truth for both placement and framing, and unioned it into <code>fitToView()</code>. Fit-to-view (⌘0 / the canvas Fit button) now always frames the run output alongside the nodes — it can no longer strand off-edge.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--amber)"></div>
+      <div class="fhead">
+        <span class="fid">F3</span>
+        <span class="ftitle">Inspector header: the editable title sits flush against the captions</span>
+        <span class="pill sev-med">Medium</span>
+        <span class="pill st-prog" data-status>In progress</span>
+      </div>
+      <div class="fbody">
+        <p>The reported screenshot bug. In the node inspector header, the editable title <code>TextField</code> had only a 2pt gap above the kind / portability / API caption rows — an editable bordered field flush against text reads as broken.</p>
+        <span class="lab">Evidence</span>
+        <div class="chips">
+          <span class="chip"><b>header()</b> VStack spacing <code>DS.Space.xxs</code> = 2pt — NodeInspector.swift:75</span>
+        </div>
+        <div class="fix">
+          <span class="lab">Shipped (+ app-wide audit)</span>
+          <p>Title↔caption-group gap is now <code>DS.Space.sm</code> (8pt); caption lines stay grouped at <code>xxs</code>. Audited every <code>xxs</code> use app-wide: also relaxed the two Datasets sheet title/subtitle headers (<code>xxs→xs</code>). Deliberately <b style="color:var(--tx)">left ~20 other</b> <code>xxs</code> uses untouched — list rows, badges, hairlines, the <code>DSField</code> label/caption — those are intentional tight groupings, not the bug.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--yellow)"></div>
+      <div class="fhead">
+        <span class="fid">F4</span>
+        <span class="ftitle">No keyboard path to the four tabs; menu bar is the empty scaffold</span>
+        <span class="pill sev-low">Low</span>
+        <span class="pill st-prog" data-status>In progress</span>
+      </div>
+      <div class="fbody">
+        <p>For a "Native-First" app, primary navigation had no keyboard shortcut and the macOS menu bar carried none of the app's commands. <code>ContentView</code> bound only ⌘\ (focus mode); the tabs were bare <code>.tag(0–3)</code>.</p>
+        <div class="fix">
+          <span class="lab">Shipped (partial)</span>
+          <p>Added <code>⌘1–4</code> to jump straight to Playground · Datasets · Lab · Run History.</p>
+        </div>
+        <div class="rec">
+          <span class="lab">Deferred — why</span>
+          <p>Populating the menu bar (View/Edit <code>CommandGroup</code>s) needs Scene-level wiring and a product call on menu structure — flagged rather than guessed.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--yellow)"></div>
+      <div class="fhead">
+        <span class="fid">F5</span>
+        <span class="ftitle">Canvas captions truncate the very API symbols they teach</span>
+        <span class="pill sev-low">Low</span>
+        <span class="pill st-defer">Recommendation</span>
+      </div>
+      <div class="fbody">
+        <p>On the canvas, the API captions that are the product's core idea read <code>DynamicGenerationS…</code>, <code>LanguageModelS…</code>, even the title <code>Instruc…</code>. The full symbol shows in the inspector — but you spend your time on the canvas.</p>
+        <div class="rec">
+          <span class="lab">Recommendation</span>
+          <p>Widen the node header, or add a <code>.help()</code> tooltip with the full symbol. Low-risk, deferred to keep this pass surgical.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="finding">
+      <div class="rail" style="background:var(--yellow)"></div>
+      <div class="fhead">
+        <span class="fid">F6</span>
+        <span class="ftitle">Click ambiguity: select vs. inline rename; inspector off by default</span>
+        <span class="pill sev-low">Low</span>
+        <span class="pill st-defer">Recommendation</span>
+      </div>
+      <div class="fbody">
+        <p>Clicking a node sometimes selects, sometimes drops into inline title-rename depending on prior selection. Separately, the inspector — the primary config surface — is off by default and discoverable only via ⌘⌥I.</p>
+        <div class="rec">
+          <span class="lab">Recommendation — deferred</span>
+          <p>Disambiguate rename (double-click / explicit affordance) and consider opening the inspector on node-select. Both are interaction-design changes with regression risk / opinionated UX — they want product input, not a unilateral edit.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" style="animation-delay:.24s" id="corrections">
+    <p class="seclabel"><span class="n">03</span> &nbsp;Corrections — first-pass claims that didn't survive verification</p>
+    <div class="correct">
+      <h3><span class="x">retracted</span> "Datasets can't store gold / reference outputs"</h3>
+      <p>Incorrect. <code>expectedOutputField</code> exists and is fully wired (DatasetsView.swift:537 → loaded from <code>ExampleModel.expectedOutput</code> → scored by the Lab's reference evaluator in Pipeline.swift). Objective reference-based eval <b style="color:var(--tx)">is</b> usable through the app today. The only real defect was a stale file-header comment still calling it "reference-free / a roadmap item" — now fixed.</p>
+    </div>
+    <div class="correct">
+      <h3><span class="x">softened</span> "Token accounting is oversold as a reliability feature"</h3>
+      <p>Overstated. The PRD is explicitly version-gated and honest — exact counts via <code>response.usage</code> on 26.4+, a clearly-stated heuristic fallback (CJK ≈1 tok/char; Latin ≈1 tok/4 chars) on 26.0–26.3 — and the UI labels figures "~estimated." No change warranted. Residual nuance only: the current pre-26.4 build is heuristic-in-practice, which the UI already communicates.</p>
+    </div>
+  </section>
+
+  <section class="sect" style="animation-delay:.28s">
+    <p class="seclabel"><span class="n">04</span> &nbsp;Fix log — committed per issue on <code style="font-size:12px">fix/ux-review-followups</code></p>
+    <div class="log">
+      <div class="logrow" data-log="A">
+        <div class="lid">A</div>
+        <div class="lmsg">fix(inspector): breathing room between editable title and captions
+          <span class="files">— NodeInspector.swift · DatasetsView.swift</span>
+          <span class="got"><b>Gotcha:</b> the fix is per-pattern, not the <code>xxs</code> token — ~20 legit tight groupings (list rows, badges, hairlines) must stay 2pt.</span>
+        </div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+      </div>
+      <div class="logrow" data-log="B">
+        <div class="lid">B</div>
+        <div class="lmsg">fix(canvas): include result card in Fit-to-view via single-source resultCardRect
+          <span class="files">— CanvasResultCard.swift · GraphEngine.swift · GraphCanvas.swift</span>
+          <span class="got"><b>Gotcha:</b> card height is content-driven; the framing rect uses a nominal upper bound (over-estimate only adds padding, never clips).</span>
+        </div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+      </div>
+      <div class="logrow" data-log="C">
+        <div class="lid">C</div>
+        <div class="lmsg">feat(nav): ⌘1–4 jump to workspace tabs
+          <span class="files">— App/ContentView.swift</span>
+          <span class="got"><b>Gotcha:</b> <code>Character("\(n)")</code> doesn't compile (no String init) — used literal KeyEquivalents via a tiny helper instead.</span>
+        </div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+      </div>
+      <div class="logrow" data-log="D">
+        <div class="lid">D</div>
+        <div class="lmsg">docs(datasets): correct stale "reference-free" header comment
+          <span class="files">— DatasetsView.swift</span>
+          <span class="got"><b>Gotcha:</b> the comment contradicted the code below it — the kind of drift that produced a wrong first-pass finding.</span>
+        </div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+      </div>
+      <div class="logrow" data-log="E">
+        <div class="lid">E</div>
+        <div class="lmsg">docs(prd): mark cross-provider routing as roadmap, not current
+          <span class="files">— docs/prd.md (status note · §5.2 marker · §8.7)</span>
+          <span class="got"><b>Gotcha:</b> left §1.1's accurate framework-level text alone; only the product-level capability claims were annotated.</span>
+        </div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Status flips to "shipped" as each commit lands. Build verified (macOS Debug) after the code changes.</p>
+  </section>
+
+  <section class="sect" style="animation-delay:.32s">
+    <p class="seclabel"><span class="n">05</span> &nbsp;Deferred, with reasons</p>
+    <ul class="clean">
+      <li><b>Cross-provider feature build</b> — a product decision + significant feature, not a fix. The doc is reconciled; the call is yours (F1).</li>
+      <li><b>Menu-bar Commands</b> — needs Scene-level <code>CommandGroup</code> wiring and a structure decision (F4).</li>
+      <li><b>Inspector open-on-select</b> — opinionated UX; default-off may be intentional.</li>
+      <li><b>Canvas caption truncation</b> — low-risk polish, easy follow-up (F5).</li>
+      <li><b>Select-vs-rename disambiguation</b> — interaction change with regression risk (F6).</li>
+    </ul>
+    <p style="color:var(--tx2); margin-top:16px">Principle: fix the clear, low-risk, well-scoped issues surgically and commit each; flag the strategic or risky ones rather than ram them in.</p>
+  </section>
+
+  <div class="foot">
+    <span>NativeX Desktop · critical review · 2026-06-15</span>
+    <span>fresh-eyes pass · live UI + source-verified</span>
+  </div>
+
+</div>
+</body>
+</html>
