@@ -217,7 +217,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return projection.render(["Der  ·  Determiner  ·  lemma: der",
                                                         "schläft  ·  Verb  ·  lemma: schlafen  ·  [shlayft]"])
         case .detectLanguage: return "de"
-        case .namedEntities:  return projection.render(["Angela Merkel  ·  Person", "Berlin  ·  Place"])
+        case .namedEntities:  return projection.render(["Apple  ·  Organization", "Tim Cook  ·  Person", "Cupertino  ·  Place"])
         case .sentiment:      return #"{"score": 0.82, "label": "positive"}"#
         case .textStats:      return #"{"characters": 248, "words": 41, "sentences": 3, "lines": 5}"#
         case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
