@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Native-API node session — handoff</title>
+<style>
+  :root { --bg:#0f1117; --card:#171a23; --line:#262b38; --txt:#d8dce6; --dim:#9aa3b5;
+          --accent:#7aa2f7; --ok:#7bd88f; --warn:#e0af68; --danger:#f7768e; --code:#1b1f2a;
+          --cyan:#7dcfff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .wrap { max-width:920px; margin:0 auto; padding:32px 22px 80px; }
+  h1 { font-size:25px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:34px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); color:#fff; }
+  h3 { font-size:14px; margin:18px 0 6px; color:var(--accent); }
+  p, li { color:var(--txt); }
+  .sub { color:var(--dim); margin:0 0 18px; }
+  .badge { display:inline-block; font-size:12px; font-weight:600; padding:2px 9px; border-radius:20px; }
+  .b-ok { background:rgba(123,216,143,.15); color:var(--ok); border:1px solid rgba(123,216,143,.35); }
+  .b-warn { background:rgba(224,175,104,.15); color:var(--warn); border:1px solid rgba(224,175,104,.35); }
+  .b-cyan { background:rgba(125,207,255,.13); color:var(--cyan); border:1px solid rgba(125,207,255,.32); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:12px 0; }
+  code { background:var(--code); padding:1px 6px; border-radius:5px; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:#c7d0e6; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto;
+        font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; color:#c7d0e6; }
+  ol.steps { counter-reset:s; list-style:none; padding-left:0; }
+  ol.steps > li { counter-increment:s; position:relative; padding:11px 0 11px 42px; border-bottom:1px dashed var(--line); }
+  ol.steps > li:last-child { border-bottom:0; }
+  ol.steps > li::before { content:counter(s); position:absolute; left:0; top:11px; width:26px; height:26px;
+        background:var(--accent); color:#0b0e14; font-weight:700; border-radius:50%; display:grid; place-items:center; font-size:13px; }
+  .callout { border-left:3px solid var(--warn); background:rgba(224,175,104,.07); padding:10px 14px; border-radius:0 8px 8px 0; margin:10px 0; }
+  .callout.danger { border-left-color:var(--danger); background:rgba(247,118,142,.07); }
+  .callout.ok { border-left-color:var(--ok); background:rgba(123,216,143,.07); }
+  .callout.info { border-left-color:var(--cyan); background:rgba(125,207,255,.06); }
+  .k { color:var(--dim); }
+  ul.tight { margin:6px 0; padding-left:20px; } ul.tight li { margin:4px 0; }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; margin:8px 0; }
+  th { text-align:left; color:var(--dim); font-weight:600; padding:6px 10px; border-bottom:1px solid var(--line); font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  td { padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.mono, .files td:first-child { font:12.5px ui-monospace,Menlo,monospace; color:var(--accent); white-space:nowrap; }
+  .files td:nth-child(2) { color:var(--txt); }
+  .chk { color:var(--ok); } .x { color:var(--danger); }
+  .pill { font:11.5px ui-monospace,Menlo,monospace; padding:1px 7px; border-radius:5px; background:var(--code); color:var(--cyan); }
+  .hash { color:var(--dim); font:12px ui-monospace,Menlo,monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Native-API node system — session handoff</h1>
+  <p class="sub">NativeX Desktop (codebase: <em>Prompt Playground</em>) · branch <code>dev</code> · 5 commits <code>ffcea76…2696a8e</code>
+    <span class="badge b-ok">builds clean (Debug · My&nbsp;Mac)</span>
+    <span class="badge b-warn">inspector UX not run on-device</span></p>
+
+  <div class="card">
+    <strong>TL;DR.</strong> Hardened &amp; expanded the <strong>Native-API / Hook node</strong> system. Direction locked with the user:
+    <strong>curated + version-gated static registry</strong> — <em>not</em> runtime introspection. Added 6 executable ops + 2 transform modes,
+    made version-conditionality structured, and added OS-level execution tracing.
+    <ul class="tight">
+      <li><strong>Version-gate</strong> the op catalog (<code>since</code>/<code>fallback</code>) so it can't over-claim a capability the OS can't deliver. <span class="hash">ffcea76</span></li>
+      <li>Curated <strong>4 general text ops</strong> (NER, sentiment, text-stats, chunk) + <code>textTransform</code> fold/collapse modes. <span class="hash">71042e9</span></li>
+      <li><strong>os_signpost</strong> interval per graph node → Instruments profiling. <span class="hash">647d64f</span></li>
+      <li>Promoted <strong>Vision OCR + barcode</strong> from <code>.planned</code> → executable (PRD §5.4.1). <span class="hash">2696a8e</span></li>
+    </ul>
+    Everything verified by <em>build + headless logic traces</em> (incl. end-to-end Vision on generated images). On-device <em>inspector UX</em> is the one thing not yet eyeballed.
+  </div>
+
+  <h2>0 · Read this first — two corrections that reframe everything</h2>
+  <div class="callout danger">
+    <strong>NativeX Desktop is a GENERAL-PURPOSE Apple Foundation-Models workbench</strong> (assistants, translation, content tools, agents — PRD §1.2, §3.1).
+    It is <strong>not</strong> a language-learning tool and <strong>not</strong> "wiekant's test bed". <strong>wiekant</strong> is <em>one representative client</em> (PRD §7).
+    Do <u>not</u> scope, justify, name, or test ops through a language-learning lens. <span class="k">(This mistake was made twice this session.)</span>
+  </div>
+  <div class="callout info">
+    <strong>The authoritative native-op spec is PRD §5.4.1.</strong> <code>docs/</code> is <strong>git-ignored</strong> → read <code>docs/prd.md</code> <em>on disk</em>
+    (it won't show in git history). Verify new/changed ops against §5.4.1 <u>before</u> writing code — the repo's own rule is "read <code>docs/</code> first."
+  </div>
+
+  <h2>1 · Architecture — the declaration-driven static registry</h2>
+  <p>Every Native-API/Hook op is one <code>HookOp</code> enum case whose properties <em>declare</em> its arguments, return shape, portability, and version floor.
+    The inspector UI is <strong>generated</strong> from those declarations + the <code>APICatalog</code> mapping — there is almost no per-op UI code.
+    A graph run dispatches each op through <code>HookEngine.apply</code>, shared by the Graph executor and the headless Lab runners.</p>
+
+  <h3>Adding / changing an op = the 4-touch-point recipe</h3>
+  <p>The CLAUDE.md recipe said three; it is really <strong>four</strong> (the 4th is hardcoded and the build can't catch a miss):</p>
+  <ol class="steps">
+    <li><strong><code>Core/HookDef.swift</code></strong> — add the <code>HookOp</code> case <em>and</em> every <u>exhaustive</u> computed-property switch:
+        <code>displayName</code>, <code>detail</code>, <code>paramKeys</code>, <code>returnShape</code>, <code>outputPreview</code>, <code>defaultOutputVar</code>.
+        <span class="k">(<code>phase</code> defaults <code>.both</code>, <code>portability</code> defaults <code>.universal</code> — only override when needed.)</span>
+        New params → add to <code>HookParam</code> (<code>label</code> + <code>placeholder</code>; <code>control</code> defaults to <code>.text</code>).</li>
+    <li><strong><code>Core/APICatalog.swift</code></strong> — add an <code>APICatalogEntry</code> to the <code>available[]</code> array: official <code>symbol</code> · <code>signature</code> ·
+        per-arg <code>APIArgument</code> (link each to its <code>param:</code> or <code>fromInput:</code>) · <code>docPath</code> · <code>keywords</code>.
+        Version-gated ops set <code>since</code>/<code>fallback</code>.</li>
+    <li><strong><code>Core/HookEngine.swift</code></strong> — add the <code>apply()</code> branch returning a typed <code>HookValue</code> (<code>.text</code>/<code>.list</code>/<code>.number</code>/<code>.object</code>).
+        Implement it: NL logic → add to <code>LanguageTools</code>; pure compute → a private func; <strong>heavy / I-O work → <code>nonisolated async</code></strong> off the main actor (see Vision + script).</li>
+    <li><strong><code>Views/NodeInspector.swift</code></strong> — add the op to the hardcoded per-node-kind <code>candidates</code> list
+        (<code>.nativeAPI</code> = NL/FM/Vision ops · <code>.hook</code> = glue/script ops). <span class="badge b-warn">the compiler cannot catch a missing entry — the op just silently won't appear in the picker</span></li>
+  </ol>
+
+  <h2>2 · What shipped — ops</h2>
+  <table>
+    <tr><th>HookOp</th><th>Friendly</th><th>Apple API</th><th>Return</th><th>Notes</th></tr>
+    <tr><td class="mono">namedEntities</td><td>Named entities</td><td class="mono">NLTagger .nameType</td><td>list</td><td>people / places / orgs (NER)</td></tr>
+    <tr><td class="mono">sentiment</td><td>Sentiment</td><td class="mono">NLTagger .sentimentScore</td><td>object</td><td><code>{score∈-1…1, label}</code>, paragraph-averaged</td></tr>
+    <tr><td class="mono">textStats</td><td>Text stats</td><td class="mono">NLTokenizer</td><td>object</td><td><code>{characters,words,sentences,lines}</code> — length budgeting</td></tr>
+    <tr><td class="mono">chunkText</td><td>Chunk text</td><td class="mono">String (windows)</td><td>list</td><td>params <code>chunkSize</code>+<code>overlap</code>; grapheme-safe; RAG/context prep</td></tr>
+    <tr><td class="mono">ocrText</td><td>Recognize text (OCR)</td><td class="mono">RecognizeTextRequest</td><td>list</td><td>image <em>path</em> in → text; off-main; was <code>.planned</code></td></tr>
+    <tr><td class="mono">readBarcode</td><td>Read barcode / QR</td><td class="mono">DetectBarcodesRequest</td><td>list</td><td>image <em>path</em> in → payloads; off-main; was <code>.planned</code></td></tr>
+    <tr><td class="mono">textTransform</td><td>Text transform</td><td class="mono">String.folding / regex</td><td>text</td><td><strong>extended</strong>: + <code>fold</code> (strip diacritics) + <code>collapse</code> (whitespace) modes</td></tr>
+  </table>
+  <p class="k">16 ops now wired total. Vision ops take an image file path via the existing string lane (no new <code>InputSource</code>); the user supplies a path as a static Input value.</p>
+
+  <h3>Version-gate (structured, not prose)</h3>
+  <p><code>APICatalogEntry</code> gained <code>since</code> / <code>fallback</code> / computed <code>availabilityNote</code>. <code>countTokens</code> was the live over-claim — listed
+    <code>.available</code> while the executor runs a heuristic — now declares <code>since:"26.4"</code>, <code>fallback:"TokenEstimator heuristic"</code>; <code>OpRow</code> renders a
+    <span class="pill">macOS 26.4+</span> badge. <strong>One version-annotated registry, not one-per-OS</strong>: rows carry the floor, the executor does the <code>#available</code> dispatch.</p>
+
+  <h3>os_signpost</h3>
+  <p><code>GraphExecutor.signposter</code> (<code>OSSignposter</code> on an <code>OSLog</code> with category <code>.pointsOfInterest</code>) wraps each node in the run loop with one interval
+    labelled <code>"&lt;kind&gt; · &lt;apiName&gt;"</code> + an ok/error end. No-op when not recording; identical/harmless on iOS. Lets a user profile a graph run in Instruments.</p>
+
+  <h2>3 · Decisions &amp; rationale (do not re-litigate without new info)</h2>
+  <table>
+    <tr><th>Choice</th><th>Verdict</th><th>Why</th></tr>
+    <tr><td>Curated static registry + per-entry version-gate</td><td><span class="chk">KEPT</span></td><td>Type-safe, exportable, generates the inspector. The relevant text/FM surface is small &amp; enumerable.</td></tr>
+    <tr><td>Runtime objc introspection (<code>objc_copyClassList</code> / <code>NSSelectorFromString</code>)</td><td><span class="x">REJECTED</span></td><td>No typed, exportable form → can't enter the typed <code>@Generable</code> export lane that makes a config run identically on any iOS client (the product's core value). Yields names without per-arg GUI mapping / return-shape / doc metadata. Duplicates <code>.script</code>.</td></tr>
+    <tr><td><code>.tbd</code> / DocC auto-indexing</td><td><span class="x">REJECTED</span></td><td>Discovery without execution = dead-end search results in a node editor.</td></tr>
+    <tr><td><code>.script</code> (zsh) op</td><td><span class="chk">= escape hatch</span></td><td>Covers the entire long tail of "some API I didn't curate" — macOS-only, no curation cost. This is <em>why</em> introspection isn't needed.</td></tr>
+  </table>
+
+  <h2>4 · How things were verified</h2>
+  <ul class="tight">
+    <li><strong>Build:</strong> <code>xcodebuild -scheme "Prompt Playground" -configuration Debug -destination "platform=macOS" build</code>, grep <code>error:</code> / <code>BUILD SUCCEEDED</code>.
+      <span class="badge b-warn">Hard rule: never add a <code>#Playground{}</code> block — Xcode auto-runs it and crashes the model.</span></li>
+    <li><strong>Op logic:</strong> standalone <code>swift</code> scripts replicating the exact implementations, run on <em>neutral business/tech</em> fixtures (not language material).</li>
+    <li><strong>Vision end-to-end:</strong> rendered a text image (CoreText) + generated a QR (<code>CIQRCodeGenerator</code>) → OCR read <code>"Invoice 4471 Total $129.00"</code>; barcode decoded <code>"https://apple.com"</code>. Confirmed the <code>fileExists</code> guard beats Vision's raw "zero-dimensioned image" error.</li>
+  </ul>
+
+  <h2>5 · Open roadmap — PRD §5.4.1 planned ops (NEED a decision)</h2>
+  <table>
+    <tr><th>Op</th><th>SDK?</th><th>Blocker / decision needed</th></tr>
+    <tr><td class="mono">spotlightSearch<br>(CSUserQuery)</td><td><span class="chk">present</span></td><td><strong>App-scoped:</strong> <code>CSUserQuery</code> only finds content the app <em>itself</em> indexed into CoreSpotlight — not the whole Mac. A naive node returns nothing. <strong>Decide the indexing story</strong> (index the workbench's datasets/files? document as app-scoped?) before implementing — else it's another misleading guess.</td></tr>
+    <tr><td class="mono">evaluate<br>(ModelJudgeEvaluator)</td><td><span class="x">likely gated</span></td><td>WWDC-2026 Evaluations framework (test-suite oriented). Probably absent from this SDK like <code>tokenCount</code> → keep <code>.planned</code> + <strong>version-gate</strong>, don't fake it. Lower value: the Lab already ships evaluators.</td></tr>
+  </table>
+
+  <h2>6 · Landmines (each cost time this session)</h2>
+  <div class="callout danger"><strong><code>docs/</code> is git-ignored.</strong> The PRD §5.4.1 op-spec edits this session live <u>on disk only</u>, never committed. Don't assume git history shows the spec.</div>
+  <div class="callout danger"><strong><code>candidates</code> in <code>NodeInspector</code> is hardcoded</strong> per node-kind, NOT catalog-derived. Add a <code>HookOp</code> + catalog entry and the op still won't appear in the picker until you add it here. The build won't tell you.</div>
+  <div class="callout"><strong>Exhaustive-switch trap.</strong> Editing a <code>HookOp</code> computed-prop switch, it's easy to drop an existing case (I dropped <code>countTokens</code> from <code>outputPreview</code>). The build catches it <em>because</em> the switch is exhaustive — but the combined <code>nil</code> case can hide the omission. Re-check after each edit.</div>
+  <div class="callout"><strong><code>countTokens</code> is SDK-gated.</strong> <code>SystemLanguageModel.tokenCount(for:)</code> / <code>contextSize</code> (macOS 26.4) are absent in this 26.2 SDK → heuristic <code>TokenEstimator</code> fallback. This is the canonical version-gated op.</div>
+  <div class="callout ok"><strong>The new Swift Vision API IS in this SDK.</strong> <code>RecognizeTextRequest</code> / <code>DetectBarcodesRequest</code> / <code>CSUserQuery</code> all compile here (probe-confirmed) — that's why OCR/barcode could be promoted. Always probe SDK presence before promoting a <code>.planned</code> op.</div>
+
+  <h2>7 · File map</h2>
+  <table class="files">
+    <tr><td>Core/APICatalog.swift</td><td>Metadata registry. <code>APICatalogEntry</code> (symbol · per-arg <code>APIArgument</code> · doc link · <code>since</code>/<code>fallback</code>). <code>available[]</code> + <code>planned[]</code>. Drives the op picker, every node's "API mapping" section, and <code>GraphNode.apiName</code>.</td></tr>
+    <tr><td>Core/HookDef.swift</td><td><code>HookOp</code> enum + the declarative computed props. <code>HookParam</code> (control kinds), <code>OutputProjection</code> (the one list serializer), <code>HookDef</code>/<code>HookPipelineDef</code>.</td></tr>
+    <tr><td>Core/HookEngine.swift</td><td><code>@MainActor</code>. <code>apply()</code> dispatch + impls; typed <code>HookValue</code> returns. <code>nonisolated async</code> for off-main work (script via background queue; Vision OCR/barcode). <code>HookError</code> (incl. <code>fileNotFound</code>).</td></tr>
+    <tr><td>Core/PlaygroundCore.swift</td><td><code>LanguageTools</code> (NL helpers: <code>detect</code>, <code>enrich</code>, <code>namedEntities</code>, <code>sentiment</code>, <code>textStats</code>), <code>TokenEstimator</code>, <code>GenConfig</code>.</td></tr>
+    <tr><td>Core/GraphExecutor.swift</td><td>Topo-sort node-loop executor (live FM calls). Now hosts <code>OSSignposter</code> (os_signpost intervals).</td></tr>
+    <tr><td>Views/NodeInspector.swift</td><td>Inspector UI. <code>candidates</code> (the hardcoded 4th touch-point). <code>OpRow</code> (planned / portability / <code>availabilityNote</code> badges).</td></tr>
+    <tr><td>docs/prd.md</td><td><span class="badge b-cyan">git-ignored</span> §5.4.1 = authoritative op spec. Updated this session to spec the 4 utility ops generally.</td></tr>
+  </table>
+
+  <h2>8 · Commits (branch <code>dev</code>)</h2>
+  <table>
+    <tr><th>Hash</th><th>Summary</th></tr>
+    <tr><td class="mono">ffcea76</td><td>version-gate the op catalog (<code>since</code>/<code>fallback</code> + badge; fix <code>countTokens</code> over-claim) + add NER op; correct CLAUDE.md recipe to 4 touch-points</td></tr>
+    <tr><td class="mono">71042e9</td><td>curate 3 text ops (sentiment · text-stats · chunk) + <code>textTransform</code> fold/collapse modes</td></tr>
+    <tr><td class="mono">647d64f</td><td>os_signpost intervals around each graph node execution</td></tr>
+    <tr><td class="mono">0a0bcc2</td><td>de-bias NER output preview (PRD §5.4.1 spec updated on disk — <code>docs/</code> ignored)</td></tr>
+    <tr><td class="mono">2696a8e</td><td>promote Vision OCR + barcode ops to executable (PRD §5.4.1)</td></tr>
+  </table>
+
+  <p class="sub" style="margin-top:30px">Generated as a session handoff · last op state: 16 wired ops · 2 planned remaining (<code>spotlightSearch</code>, <code>evaluate</code>).</p>
+
+</div>
+</body>
+</html>
