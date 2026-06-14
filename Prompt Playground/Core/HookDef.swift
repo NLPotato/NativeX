@@ -120,6 +120,7 @@ enum OutputProjection: String, Codable, CaseIterable, Sendable {
 /// round-trips through plain Codable with no hand-written enum coding — mirrors `taskRaw`.
 enum HookOp: String, Codable, CaseIterable, Sendable {
     case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit, namedEntities, sentiment, textStats
+    case ocrText, readBarcode
     case countTokens
     case regexExtract, regexReplace, jsonExtract, textTransform, chunkText
     case script
@@ -133,6 +134,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .namedEntities:  return "Named entities"
         case .sentiment:      return "Sentiment"
         case .textStats:      return "Text stats"
+        case .ocrText:        return "Recognize text (OCR)"
+        case .readBarcode:    return "Read barcode / QR"
         case .countTokens:    return "Count tokens"
         case .regexExtract:   return "Regex extract"
         case .regexReplace:   return "Regex replace"
@@ -151,6 +154,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .namedEntities:  return "NLTagger .nameType → people · places · organizations"
         case .sentiment:      return "NLTagger .sentimentScore → JSON {score ∈ -1…1, label}"
         case .textStats:      return "Characters · words · sentences · lines, as JSON — context budgeting"
+        case .ocrText:        return "Vision RecognizeTextRequest → recognized text lines from an image path"
+        case .readBarcode:    return "Vision DetectBarcodesRequest → decoded payloads from an image path"
         case .countTokens:    return "Token count vs the 4096-token context window, as JSON {tokens, contextWindow, percentOfWindow} — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
         case .regexExtract:   return "First match (or capture group) of a pattern"
         case .regexReplace:   return "Replace every match of a pattern"
@@ -188,6 +193,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .detectLanguage: return []
         case .sentiment:      return []
         case .textStats:      return []
+        case .ocrText:        return []
+        case .readBarcode:    return []
         case .countTokens:    return []
         case .regexExtract:   return [.pattern, .group]
         case .regexReplace:   return [.pattern, .replacement]
@@ -201,7 +208,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// What the underlying call returns — drives the one shared output-projection control.
     var returnShape: HookReturnShape {
         switch self {
-        case .tokenizeWords, .sentenceSplit, .enrichGloss, .namedEntities, .chunkText: return .list
+        case .tokenizeWords, .sentenceSplit, .enrichGloss, .namedEntities, .chunkText, .ocrText, .readBarcode: return .list
         case .countTokens, .sentiment, .textStats:         return .object
         default:                                           return .text
         }
@@ -223,6 +230,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
         case .chunkText:      return projection.render(["…first 1000 characters of the input…",
                                                         "…next window, overlapping the previous…"])
+        case .ocrText:        return projection.render(["Invoice #4471", "Total: $129.00"])
+        case .readBarcode:    return projection.render(["https://apple.com", "012345678905"])
         case .regexExtract, .regexReplace, .jsonExtract, .textTransform, .script:
             return nil
         }
@@ -237,6 +246,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .namedEntities:  return "entities"
         case .sentiment:      return "sentiment"
         case .textStats:      return "stats"
+        case .ocrText:        return "recognizedText"
+        case .readBarcode:    return "payloads"
         case .countTokens:    return "tokenCount"
         case .regexExtract:   return "match"
         case .regexReplace:   return "replaced"

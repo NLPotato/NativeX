@@ -741,7 +741,7 @@ private struct OpCatalogPicker: View {
     /// glue/script ops on a Hook node). Planned entries surface on the Native API side only.
     private var candidates: [APICatalogEntry] {
         let ops: [HookOp] = node.kind == .nativeAPI
-            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .namedEntities, .sentiment, .textStats, .countTokens]
+            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .namedEntities, .sentiment, .textStats, .ocrText, .readBarcode, .countTokens]
             : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform, .chunkText]
         return ops.compactMap(APICatalog.entry(for:))
     }

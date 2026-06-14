@@ -238,6 +238,35 @@ enum APICatalog {
             since: "26.4", fallback: "TokenEstimator heuristic"),
 
         APICatalogEntry(
+            op: .ocrText, plannedKey: nil, name: "Recognize text (OCR)",
+            framework: "Vision",
+            summary: "Recognize text from an image file path — one line per text observation. Universal on-device Vision.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "RecognizeTextRequest",
+                signature: "init() · recognitionLevel = .accurate · perform(on:) async throws",
+                args: [
+                    APIArgument("on", "URL", "input wire (image file path)", fromInput: true),
+                    APIArgument("recognitionLevel", "RecognizeTextRequest.RecognitionLevel", "fixed — .accurate"),
+                ],
+                returns: "[RecognizedTextObservation] → topCandidates(1) strings, serialized by the node's “Output as” projection",
+                docPath: "vision/recognizetextrequest")],
+            keywords: ["ocr", "vision", "image", "text recognition", "scan", "document"]),
+
+        APICatalogEntry(
+            op: .readBarcode, plannedKey: nil, name: "Read barcode / QR",
+            framework: "Vision",
+            summary: "Decode barcodes and QR codes from an image file path — one payload per detected symbol.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "DetectBarcodesRequest",
+                signature: "init() · perform(on:) async throws",
+                args: [APIArgument("on", "URL", "input wire (image file path)", fromInput: true)],
+                returns: "[BarcodeObservation] → payloadString, serialized by the node's “Output as” projection",
+                docPath: "vision/detectbarcodesrequest")],
+            keywords: ["barcode", "qr", "vision", "scan", "decode", "image"]),
+
+        APICatalogEntry(
             op: .regexExtract, plannedKey: nil, name: "Regex extract",
             framework: "Foundation",
             summary: "First match (or capture group) of a pattern.",
@@ -342,32 +371,6 @@ enum APICatalog {
     // MARK: Planned operations (PRD §5.4.1 — documented + searchable, not yet executable)
 
     private static let planned: [APICatalogEntry] = [
-        APICatalogEntry(
-            op: nil, plannedKey: "ocrText", name: "Recognize text (OCR)",
-            framework: "Vision",
-            summary: "Vision-backed text recognition from an image input (path/URL).",
-            status: .planned, portability: .universal,
-            calls: [APICall(
-                symbol: "RecognizeTextRequest",
-                signature: "perform(on:) async throws",
-                args: [APIArgument("on", "URL · CGImage", "input wire (image path)")],
-                returns: "[RecognizedTextObservation] → recognized text",
-                docPath: "vision/recognizetextrequest")],
-            keywords: ["ocr", "vision", "image", "text recognition"]),
-
-        APICatalogEntry(
-            op: nil, plannedKey: "readBarcode", name: "Read barcode / QR",
-            framework: "Vision",
-            summary: "Decode barcodes and QR codes from an image input.",
-            status: .planned, portability: .universal,
-            calls: [APICall(
-                symbol: "DetectBarcodesRequest",
-                signature: "perform(on:) async throws",
-                args: [APIArgument("on", "URL · CGImage", "input wire (image path)")],
-                returns: "[BarcodeObservation] → payloadString",
-                docPath: "vision/detectbarcodesrequest")],
-            keywords: ["barcode", "qr", "vision", "scan", "decode"]),
-
         APICatalogEntry(
             op: nil, plannedKey: "spotlightSearch", name: "Spotlight search",
             framework: "CoreSpotlight",

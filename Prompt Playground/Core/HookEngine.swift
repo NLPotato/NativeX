@@ -16,6 +16,7 @@
 
 import Foundation
 import NaturalLanguage
+import Vision
 import os
 
 @MainActor
@@ -23,10 +24,12 @@ enum HookEngine {
     enum HookError: LocalizedError {
         case invalidRegex(String)
         case emptyCommand
+        case fileNotFound(String)
         var errorDescription: String? {
             switch self {
             case .invalidRegex(let p): return "Invalid regular expression: \(p)"
             case .emptyCommand:        return "Script hook has no command."
+            case .fileNotFound(let p): return "No file at path: \(p)"
             }
         }
     }
@@ -120,6 +123,10 @@ enum HookEngine {
             let size = Int(params[HookParam.chunkSize.rawValue] ?? "") ?? 1000
             let overlap = Int(params[HookParam.overlap.rawValue] ?? "") ?? 0
             return .list(chunkText(input, size: size, overlap: overlap))
+        case .ocrText:
+            return .list(try await recognizeText(imagePath: input))
+        case .readBarcode:
+            return .list(try await readBarcodes(imagePath: input))
         case .detectLanguage:
             return .text(LanguageTools.detect(input)?.rawValue ?? "und")
         case .countTokens:
@@ -216,6 +223,38 @@ enum HookEngine {
                               : "Script failed (\(process.terminationStatus)): \(stderr)"])
         }
         return (String(data: outData, encoding: .utf8) ?? "").trimmingCharacters(in: .newlines)
+    }
+
+    // MARK: - Vision ops (image path in → text out; universal iOS · macOS)
+    //
+    // The input wire carries an image FILE PATH (a string — same lane as every other op); Vision
+    // recognizes/decodes it and the result re-enters the string pipeline. `nonisolated` + `async` so
+    // the Vision work runs off the main actor (§6.1), like model inference.
+
+    /// Resolve a non-empty image path to a readable URL, or nil for empty input (→ empty result).
+    nonisolated private static func imageURL(from path: String) throws -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let url = URL(filePath: trimmed)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw HookError.fileNotFound(trimmed) }
+        return url
+    }
+
+    /// Vision OCR — recognized text, one list item per text observation (top candidate).
+    nonisolated private static func recognizeText(imagePath: String) async throws -> [String] {
+        guard let url = try imageURL(from: imagePath) else { return [] }
+        var request = RecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        let observations = try await request.perform(on: url)
+        return observations.compactMap { $0.topCandidates(1).first?.string }
+    }
+
+    /// Vision barcode / QR decode — one decoded payload string per detected symbol.
+    nonisolated private static func readBarcodes(imagePath: String) async throws -> [String] {
+        guard let url = try imageURL(from: imagePath) else { return [] }
+        let request = DetectBarcodesRequest()
+        let results = try await request.perform(on: url)
+        return results.compactMap { $0.payloadString }
     }
 
     // MARK: - NaturalLanguage ops (reuse LanguageTools where it already owns the logic)
