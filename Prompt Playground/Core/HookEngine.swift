@@ -110,6 +110,16 @@ enum HookEngine {
             return .list(enrich(input, language: params[HookParam.language.rawValue] ?? ""))
         case .namedEntities:
             return .list(LanguageTools.namedEntities(input, language: params[HookParam.language.rawValue] ?? ""))
+        case .sentiment:
+            let s = LanguageTools.sentiment(input)
+            return .object(json: #"{"score": \#(String(format: "%.2f", s.score)), "label": "\#(s.label)"}"#)
+        case .textStats:
+            let st = LanguageTools.textStats(input)
+            return .object(json: #"{"characters": \#(st.characters), "words": \#(st.words), "sentences": \#(st.sentences), "lines": \#(st.lines)}"#)
+        case .chunkText:
+            let size = Int(params[HookParam.chunkSize.rawValue] ?? "") ?? 1000
+            let overlap = Int(params[HookParam.overlap.rawValue] ?? "") ?? 0
+            return .list(chunkText(input, size: size, overlap: overlap))
         case .detectLanguage:
             return .text(LanguageTools.detect(input)?.rawValue ?? "und")
         case .countTokens:
@@ -276,7 +286,27 @@ enum HookEngine {
         case "lower":     return input.lowercased()
         case "trimlines": return input.split(separator: "\n", omittingEmptySubsequences: false)
                                        .map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\n")
+        case "fold":      return input.folding(options: .diacriticInsensitive, locale: nil)
+        case "collapse":  return input.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                                       .trimmingCharacters(in: .whitespacesAndNewlines)
         default:          return input.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+    }
+
+    /// Split into windows of `size` characters (grapheme clusters) advancing by `size - overlap`, so
+    /// consecutive chunks share `overlap` characters; the trailing partial window is kept. The
+    /// canonical "prep a long doc for the context window / few-shot" op — deterministic, no NL model.
+    private static func chunkText(_ input: String, size: Int, overlap: Int) -> [String] {
+        let chars = Array(input)
+        guard size > 0, !chars.isEmpty else { return chars.isEmpty ? [] : [input] }
+        let step = max(1, size - max(0, overlap))
+        var chunks: [String] = []
+        var i = 0
+        while i < chars.count {
+            chunks.append(String(chars[i..<min(i + size, chars.count)]))
+            if i + size >= chars.count { break }
+            i += step
+        }
+        return chunks
     }
 }

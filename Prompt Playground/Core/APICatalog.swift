@@ -193,6 +193,35 @@ enum APICatalog {
             keywords: ["entity", "ner", "person", "place", "organization", "name", "proper noun"]),
 
         APICatalogEntry(
+            op: .sentiment, plannedKey: nil, name: "Sentiment",
+            framework: "NaturalLanguage",
+            summary: "Sentiment of the input as {score ∈ -1…1, label} — analyze the tone of a prompt or model output.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "NLTagger",
+                signature: "init(tagSchemes: [.sentimentScore]) · enumerateTags(in:unit:scheme:)",
+                args: [
+                    APIArgument("string", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("unit", "NLTokenUnit", "fixed — .paragraph (scores averaged)"),
+                ],
+                returns: "Double per paragraph → JSON {score, label} (chain JSON extract for one field)",
+                docPath: "naturallanguage/nltagger")],
+            keywords: ["sentiment", "tone", "polarity", "positive", "negative", "emotion"]),
+
+        APICatalogEntry(
+            op: .textStats, plannedKey: nil, name: "Text stats",
+            framework: "NaturalLanguage",
+            summary: "Characters · words · sentences · lines as JSON — length budgeting alongside Count tokens.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "NLTokenizer",
+                signature: "tokens(for:) at the .word / .sentence units",
+                args: [APIArgument("string", "String", "input wire (in var)", fromInput: true)],
+                returns: "JSON {characters, words, sentences, lines}",
+                docPath: "naturallanguage/nltokenizer")],
+            keywords: ["count", "words", "characters", "length", "statistics", "sentences", "lines", "budget"]),
+
+        APICatalogEntry(
             op: .countTokens, plannedKey: nil, name: "Count tokens",
             framework: "FoundationModels",
             summary: "Token count of the input + its share of the model's context window, as JSON {tokens, contextWindow, percentOfWindow}. Heuristic estimate on this SDK; routes through the native 26.4 API when the SDK ships it.",
@@ -261,18 +290,35 @@ enum APICatalog {
         APICatalogEntry(
             op: .textTransform, plannedKey: nil, name: "Text transform",
             framework: "Swift",
-            summary: "trim / lowercase / uppercase / trim each line.",
+            summary: "trim / lowercase / uppercase / trim each line / fold diacritics / collapse whitespace.",
             status: .available, portability: .universal,
             calls: [APICall(
                 symbol: "String",
-                signature: "trimmingCharacters(in:) · lowercased() · uppercased()",
+                signature: "trimmingCharacters(in:) · lowercased() · uppercased() · folding(options:)",
                 args: [
                     APIArgument("self", "String", "input wire (in var)", fromInput: true),
-                    APIArgument("mode", "String", "“mode” picker: trim | lower | upper | trimlines", param: .mode),
+                    APIArgument("mode", "String", "“mode” picker: trim | lower | upper | trimlines | fold | collapse", param: .mode),
                 ],
                 returns: "String",
                 docPath: "swift/string")],
-            keywords: ["trim", "lowercase", "uppercase", "clean", "whitespace"]),
+            keywords: ["trim", "lowercase", "uppercase", "clean", "whitespace", "fold", "diacritic", "accent", "normalize"]),
+
+        APICatalogEntry(
+            op: .chunkText, plannedKey: nil, name: "Chunk text",
+            framework: "Swift",
+            summary: "Split into fixed-size character windows with optional overlap — prep long input for the context window / few-shot.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "String",
+                signature: "windowed character slices",
+                args: [
+                    APIArgument("self", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("size", "Int", "“chunk size” param (characters per window)", param: .chunkSize),
+                    APIArgument("overlap", "Int", "“overlap” param (shared characters, default 0)", param: .overlap),
+                ],
+                returns: "[String] → chunk list, serialized by the node's “Output as” projection",
+                docPath: "swift/string")],
+            keywords: ["chunk", "split", "window", "segment", "rag", "context", "overlap", "slice"]),
 
         APICatalogEntry(
             op: .script, plannedKey: nil, name: "Run script",

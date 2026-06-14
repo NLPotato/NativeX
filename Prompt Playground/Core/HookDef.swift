@@ -41,7 +41,7 @@ enum Portability: String, Codable, Sendable {
 /// it, so the inspector is generated from the op's argument list — no per-op UI code, and a node
 /// only ever shows the arguments its API actually takes.
 enum HookParam: String, Sendable, Hashable {
-    case language, pattern, group, replacement, path, mode, command, timeout
+    case language, pattern, group, replacement, path, mode, command, timeout, chunkSize, overlap
 
     /// How the inspector renders this parameter. `.choice` is a closed set (segmented/menu picker
     /// instead of free text — no magic strings to memorize); `.text` is free text ({{vars}} allowed).
@@ -57,6 +57,8 @@ enum HookParam: String, Sendable, Hashable {
         case .mode:        return "mode"
         case .command:     return "command"
         case .timeout:     return "timeout"
+        case .chunkSize:   return "chunk size"
+        case .overlap:     return "overlap"
         }
     }
     var placeholder: String {
@@ -69,11 +71,13 @@ enum HookParam: String, Sendable, Hashable {
         case .mode:        return "trim"
         case .command:     return "shell command — input on stdin, stdout becomes the output var"
         case .timeout:     return "seconds (default 30)"
+        case .chunkSize:   return "characters per chunk, e.g. 1000"
+        case .overlap:     return "overlapping characters (default 0)"
         }
     }
     var control: Control {
         switch self {
-        case .mode: return .choice(["trim", "lower", "upper", "trimlines"])
+        case .mode: return .choice(["trim", "lower", "upper", "trimlines", "fold", "collapse"])
         default:    return .text
         }
     }
@@ -115,9 +119,9 @@ enum OutputProjection: String, Codable, CaseIterable, Sendable {
 /// A native, deterministic operation. String-backed (+ a flat `params` dict) so the whole config
 /// round-trips through plain Codable with no hand-written enum coding — mirrors `taskRaw`.
 enum HookOp: String, Codable, CaseIterable, Sendable {
-    case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit, namedEntities
+    case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit, namedEntities, sentiment, textStats
     case countTokens
-    case regexExtract, regexReplace, jsonExtract, textTransform
+    case regexExtract, regexReplace, jsonExtract, textTransform, chunkText
     case script
 
     var displayName: String {
@@ -127,11 +131,14 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .detectLanguage: return "Detect language"
         case .sentenceSplit:  return "Split sentences"
         case .namedEntities:  return "Named entities"
+        case .sentiment:      return "Sentiment"
+        case .textStats:      return "Text stats"
         case .countTokens:    return "Count tokens"
         case .regexExtract:   return "Regex extract"
         case .regexReplace:   return "Regex replace"
         case .jsonExtract:    return "JSON extract"
         case .textTransform:  return "Text transform"
+        case .chunkText:      return "Chunk text"
         case .script:         return "Run script"
         }
     }
@@ -142,11 +149,14 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .detectLanguage: return "NLLanguageRecognizer → dominant language code"
         case .sentenceSplit:  return "NLTokenizer → one sentence per line"
         case .namedEntities:  return "NLTagger .nameType → people · places · organizations"
+        case .sentiment:      return "NLTagger .sentimentScore → JSON {score ∈ -1…1, label}"
+        case .textStats:      return "Characters · words · sentences · lines, as JSON — context budgeting"
         case .countTokens:    return "Token count vs the 4096-token context window, as JSON {tokens, contextWindow, percentOfWindow} — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
         case .regexExtract:   return "First match (or capture group) of a pattern"
         case .regexReplace:   return "Replace every match of a pattern"
         case .jsonExtract:    return "Read a dotted key path out of JSON"
-        case .textTransform:  return "trim / lowercase / uppercase"
+        case .textTransform:  return "trim / lowercase / uppercase / fold diacritics / collapse whitespace"
+        case .chunkText:      return "Split into fixed-size character windows (optional overlap)"
         case .script:         return "Shell command via /bin/zsh — input on stdin, stdout → output var, context vars as $PP_*"
         }
     }
@@ -176,11 +186,14 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .namedEntities:  return [.language]
         case .sentenceSplit:  return []
         case .detectLanguage: return []
+        case .sentiment:      return []
+        case .textStats:      return []
         case .countTokens:    return []
         case .regexExtract:   return [.pattern, .group]
         case .regexReplace:   return [.pattern, .replacement]
         case .jsonExtract:    return [.path]
         case .textTransform:  return [.mode]
+        case .chunkText:      return [.chunkSize, .overlap]
         case .script:         return [.command, .timeout]
         }
     }
@@ -188,8 +201,8 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// What the underlying call returns — drives the one shared output-projection control.
     var returnShape: HookReturnShape {
         switch self {
-        case .tokenizeWords, .sentenceSplit, .enrichGloss, .namedEntities: return .list
-        case .countTokens:                                 return .object
+        case .tokenizeWords, .sentenceSplit, .enrichGloss, .namedEntities, .chunkText: return .list
+        case .countTokens, .sentiment, .textStats:         return .object
         default:                                           return .text
         }
     }
@@ -205,7 +218,11 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
                                                         "schläft  ·  Verb  ·  lemma: schlafen  ·  [shlayft]"])
         case .detectLanguage: return "de"
         case .namedEntities:  return projection.render(["Angela Merkel  ·  Person", "Berlin  ·  Place"])
+        case .sentiment:      return #"{"score": 0.82, "label": "positive"}"#
+        case .textStats:      return #"{"characters": 248, "words": 41, "sentences": 3, "lines": 5}"#
         case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
+        case .chunkText:      return projection.render(["…first 1000 characters of the input…",
+                                                        "…next window, overlapping the previous…"])
         case .regexExtract, .regexReplace, .jsonExtract, .textTransform, .script:
             return nil
         }
@@ -218,11 +235,14 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .detectLanguage: return "language"
         case .sentenceSplit:  return "sentences"
         case .namedEntities:  return "entities"
+        case .sentiment:      return "sentiment"
+        case .textStats:      return "stats"
         case .countTokens:    return "tokenCount"
         case .regexExtract:   return "match"
         case .regexReplace:   return "replaced"
         case .jsonExtract:    return "field"
         case .textTransform:  return "text"
+        case .chunkText:      return "chunks"
         case .script:         return "result"
         }
     }

@@ -357,6 +357,34 @@ enum LanguageTools {
         }
         return out
     }
+
+    /// Overall sentiment as (score ∈ -1…1, label). Averages NLTagger's per-paragraph
+    /// `.sentimentScore`; languages without a sentiment model yield 0 / "neutral".
+    static func sentiment(_ text: String) -> (score: Double, label: String) {
+        let tagger = NLTagger(tagSchemes: [.sentimentScore])
+        tagger.string = text
+        var scores: [Double] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .paragraph,
+                             scheme: .sentimentScore, options: []) { tag, _ in
+            if let raw = tag?.rawValue, let v = Double(raw) { scores.append(v) }
+            return true
+        }
+        let score = scores.isEmpty ? 0 : scores.reduce(0, +) / Double(scores.count)
+        let label = score > 0.1 ? "positive" : (score < -0.1 ? "negative" : "neutral")
+        return (score, label)
+    }
+
+    /// Length statistics for context budgeting (pairs with the Count-tokens op): characters
+    /// (grapheme clusters), CJK-aware word + sentence counts (NLTokenizer), newline-delimited lines.
+    static func textStats(_ text: String) -> (characters: Int, words: Int, sentences: Int, lines: Int) {
+        func count(_ unit: NLTokenUnit) -> Int {
+            let tok = NLTokenizer(unit: unit)
+            tok.string = text
+            return tok.tokens(for: text.startIndex..<text.endIndex).count
+        }
+        let lines = text.isEmpty ? 0 : text.split(separator: "\n", omittingEmptySubsequences: false).count
+        return (text.count, count(.word), count(.sentence), lines)
+    }
 }
 
 // MARK: - Deterministic gloss enrichment (NaturalLanguage + CFStringTokenizer)
