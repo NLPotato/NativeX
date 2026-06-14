@@ -22,6 +22,14 @@ struct ContentView: View {
         .background {
             Button(action: togglePanels) { EmptyView() }
                 .keyboardShortcut("\\", modifiers: .command).opacity(0).accessibilityHidden(true)
+            // ⌘1–4 jump straight to a workspace tab (Playground · Datasets · Lab · Run History). The
+            // primary navigation had no keyboard path before; hidden buttons carry the shortcuts app-wide.
+            Group {
+                tabShortcut("1", 0)
+                tabShortcut("2", 1)
+                tabShortcut("3", 2)
+                tabShortcut("4", 3)
+            }
         }
     }
 
@@ -31,6 +39,14 @@ struct ContentView: View {
             columnVisibility = anyShown ? .detailOnly : .all
             engine.showInspector = !anyShown
         }
+    }
+
+    /// A zero-size hidden button that binds ⌘<key> to a workspace tab — carries the shortcut without
+    /// drawing any chrome (EmptyView has no tappable area, so it never intercepts canvas clicks).
+    private func tabShortcut(_ key: KeyEquivalent, _ index: Int) -> some View {
+        Button { tab = index } label: { EmptyView() }
+            .keyboardShortcut(key, modifiers: .command)
+            .opacity(0).accessibilityHidden(true)
     }
 }
 
