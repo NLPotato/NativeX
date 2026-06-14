@@ -137,7 +137,7 @@
     <div class="scorebar">
       <div class="stat red"><div class="v">1</div><div class="l">Headline pitch-vs-product gap (cross-provider)</div></div>
       <div class="stat amber"><div class="v">2</div><div class="l">UX/interaction bugs (both fixed)</div></div>
-      <div class="stat good"><div class="v">5</div><div class="l">Fixes shipped on this branch</div></div>
+      <div class="stat good"><div class="v">4</div><div class="l">Fixes committed (A–D); PRD reconciled locally</div></div>
       <div class="stat teal"><div class="v">2</div><div class="l">First-pass claims corrected on re-verify</div></div>
     </div>
   </section>
@@ -203,8 +203,8 @@
           <p>Either <b style="color:var(--tx)">build</b> a backend selector on the FM node — start with on-device ↔ PCC, both Apple-native and low-lift — <b style="color:var(--tx)">or</b> own the on-device-first scope cleanly. Building the full provider matrix is a feature, not a fix, so it's out of scope for this pass.</p>
         </div>
         <div class="fix">
-          <span class="lab">Shipped (conservative, reversible)</span>
-          <p>Reconciled the spec: a dated status note at the top of the PRD, an inline "(planned)" marker on the FM-node spec §5.2, and a new roadmap entry §8.7. This does <b>not</b> build the feature — it stops the doc from overclaiming until you decide.</p>
+          <span class="lab">Applied locally — docs/ is gitignored</span>
+          <p>Reconciled the spec: a dated status note at the top of the PRD, an inline "(planned)" marker on the FM-node spec §5.2, and a new roadmap entry §8.7 — this does <b>not</b> build the feature. Caveat: <code>docs/</code> is gitignored, so the edit lives in the working tree, not git history. Track <code>docs/</code> or relocate the note if you want it versioned.</p>
         </div>
       </div>
     </div>
@@ -359,12 +359,12 @@
         <div class="lid">E</div>
         <div class="lmsg">docs(prd): mark cross-provider routing as roadmap, not current
           <span class="files">— docs/prd.md (status note · §5.2 marker · §8.7)</span>
-          <span class="got"><b>Gotcha:</b> left §1.1's accurate framework-level text alone; only the product-level capability claims were annotated.</span>
+          <span class="got"><b>Gotcha:</b> <code>docs/</code> is gitignored, so this PRD edit is applied to the working tree but is <b>not</b> a tracked commit — flagged for the team. Left §1.1's accurate framework-level text alone; only product-level claims were annotated.</span>
         </div>
-        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+        <div class="lstat"><span class="pill st-prog" data-logstat>local · untracked</span></div>
       </div>
     </div>
-    <p class="note" style="margin-top:14px">Status flips to "shipped" as each commit lands. Build verified (macOS Debug) after the code changes.</p>
+    <p class="note" style="margin-top:14px">Commits A–D are on <code>fix/ux-review-followups</code> (build verified — macOS Debug). E is a working-tree edit only: <code>docs/</code> is gitignored, so the PRD change is not tracked in git.</p>
   </section>
 
   <section class="sect" style="animation-delay:.32s">
