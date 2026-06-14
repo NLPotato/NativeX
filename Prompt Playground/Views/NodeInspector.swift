@@ -741,7 +741,7 @@ private struct OpCatalogPicker: View {
     /// glue/script ops on a Hook node). Planned entries surface on the Native API side only.
     private var candidates: [APICatalogEntry] {
         let ops: [HookOp] = node.kind == .nativeAPI
-            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .countTokens]
+            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .namedEntities, .countTokens]
             : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform]
         return ops.compactMap(APICatalog.entry(for:))
     }
@@ -930,6 +930,8 @@ private struct OpRow: View {
                         Text("planned").dsBadge(.secondary)
                     } else if !entry.portability.isPortable {
                         Text(entry.portability.label).dsBadge(.dsWarning)
+                    } else if let note = entry.availabilityNote {
+                        Text(note).dsBadge(.dsInfo)   // version-gated native path; runs `fallback` below `since`
                     }
                 }
                 HStack(spacing: DS.Space.sm) {

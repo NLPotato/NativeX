@@ -108,6 +108,8 @@ enum HookEngine {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         case .enrichGloss:
             return .list(enrich(input, language: params[HookParam.language.rawValue] ?? ""))
+        case .namedEntities:
+            return .list(LanguageTools.namedEntities(input, language: params[HookParam.language.rawValue] ?? ""))
         case .detectLanguage:
             return .text(LanguageTools.detect(input)?.rawValue ?? "und")
         case .countTokens:

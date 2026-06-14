@@ -69,7 +69,18 @@ struct APICatalogEntry: Identifiable {
     let portability: Portability
     let calls: [APICall]
     var keywords: [String] = []
+
+    /// Minimum macOS for the op's NATIVE path (e.g. "26.4"); nil ⇒ no version floor. This is why the
+    /// catalog is ONE version-annotated registry, not one-per-OS: a row declares its floor and the
+    /// executor does the `#available` dispatch. `fallback` names what runs below `since` (declared
+    /// here, not buried in a call's prose), so the picker can't silently over-claim a capability the
+    /// running OS can't deliver.
+    var since: String? = nil
+    var fallback: String? = nil
     var id: String { op?.rawValue ?? plannedKey ?? name }
+
+    /// Picker / mapping badge when the native path is version-gated, e.g. "macOS 26.4+".
+    var availabilityNote: String? { since.map { "macOS \($0)+" } }
 
     /// Everything `search` matches against.
     var searchText: String {
@@ -165,6 +176,23 @@ enum APICatalog {
             keywords: ["gloss", "pos", "lemma", "reading", "romanization", "morphology"]),
 
         APICatalogEntry(
+            op: .namedEntities, plannedKey: nil, name: "Named entities",
+            framework: "NaturalLanguage",
+            summary: "Extract people, places, and organizations (NER) — one entity per line as “surface · type”.",
+            status: .available, portability: .universal,
+            calls: [APICall(
+                symbol: "NLTagger",
+                signature: "init(tagSchemes: [.nameType]) · enumerateTags(in:unit:scheme:options:)",
+                args: [
+                    APIArgument("string", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("setLanguage", "NLLanguage", "“language” param (name or code; empty = auto)", param: .language),
+                    APIArgument("options", "NLTagger.Options", "fixed — [.omitWhitespace, .omitPunctuation, .joinNames]"),
+                ],
+                returns: "[(NLTag, Range)] → entity list, serialized by the node's “Output as” projection",
+                docPath: "naturallanguage/nltagger")],
+            keywords: ["entity", "ner", "person", "place", "organization", "name", "proper noun"]),
+
+        APICatalogEntry(
             op: .countTokens, plannedKey: nil, name: "Count tokens",
             framework: "FoundationModels",
             summary: "Token count of the input + its share of the model's context window, as JSON {tokens, contextWindow, percentOfWindow}. Heuristic estimate on this SDK; routes through the native 26.4 API when the SDK ships it.",
@@ -175,9 +203,10 @@ enum APICatalog {
                         args: [APIArgument("for", "String", "input wire (in var)", fromInput: true)],
                         returns: "Int → JSON {tokens, contextWindow, percentOfWindow} (chain JSON extract for one field)",
                         docPath: "foundationmodels/systemlanguagemodel",
-                        note: "macOS 26.4 (back-deployed). The 26.2 SDK this app builds with exposes neither symbol (verified against its swiftinterface), so the op currently uses TokenEstimator: CJK ≈ 1 tok/char, else ≈ 1 tok/4 chars, vs the 4,096-token on-device window."),
+                        note: "The 26.2 SDK this app builds with exposes neither symbol (verified against its swiftinterface), so the op currently uses TokenEstimator: CJK ≈ 1 tok/char, else ≈ 1 tok/4 chars, vs the 4,096-token on-device window."),
             ],
-            keywords: ["token", "count", "context", "window", "estimate", "usage", "overflow"]),
+            keywords: ["token", "count", "context", "window", "estimate", "usage", "overflow"],
+            since: "26.4", fallback: "TokenEstimator heuristic"),
 
         APICatalogEntry(
             op: .regexExtract, plannedKey: nil, name: "Regex extract",

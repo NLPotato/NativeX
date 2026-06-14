@@ -115,7 +115,7 @@ enum OutputProjection: String, Codable, CaseIterable, Sendable {
 /// A native, deterministic operation. String-backed (+ a flat `params` dict) so the whole config
 /// round-trips through plain Codable with no hand-written enum coding — mirrors `taskRaw`.
 enum HookOp: String, Codable, CaseIterable, Sendable {
-    case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit
+    case tokenizeWords, enrichGloss, detectLanguage, sentenceSplit, namedEntities
     case countTokens
     case regexExtract, regexReplace, jsonExtract, textTransform
     case script
@@ -126,6 +126,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "Enrich tokens"
         case .detectLanguage: return "Detect language"
         case .sentenceSplit:  return "Split sentences"
+        case .namedEntities:  return "Named entities"
         case .countTokens:    return "Count tokens"
         case .regexExtract:   return "Regex extract"
         case .regexReplace:   return "Regex replace"
@@ -140,6 +141,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "NaturalLanguage POS + lemma + romanization per word"
         case .detectLanguage: return "NLLanguageRecognizer → dominant language code"
         case .sentenceSplit:  return "NLTokenizer → one sentence per line"
+        case .namedEntities:  return "NLTagger .nameType → people · places · organizations"
         case .countTokens:    return "Token count vs the 4096-token context window, as JSON {tokens, contextWindow, percentOfWindow} — heuristic estimate now; SystemLanguageModel.tokenCount(for:) once the 26.4 SDK ships"
         case .regexExtract:   return "First match (or capture group) of a pattern"
         case .regexReplace:   return "Replace every match of a pattern"
@@ -171,6 +173,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         switch self {
         case .tokenizeWords:  return [.language]
         case .enrichGloss:    return [.language]
+        case .namedEntities:  return [.language]
         case .sentenceSplit:  return []
         case .detectLanguage: return []
         case .countTokens:    return []
@@ -185,7 +188,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// What the underlying call returns — drives the one shared output-projection control.
     var returnShape: HookReturnShape {
         switch self {
-        case .tokenizeWords, .sentenceSplit, .enrichGloss: return .list
+        case .tokenizeWords, .sentenceSplit, .enrichGloss, .namedEntities: return .list
         case .countTokens:                                 return .object
         default:                                           return .text
         }
@@ -201,6 +204,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return projection.render(["Der  ·  Determiner  ·  lemma: der",
                                                         "schläft  ·  Verb  ·  lemma: schlafen  ·  [shlayft]"])
         case .detectLanguage: return "de"
+        case .namedEntities:  return projection.render(["Angela Merkel  ·  Person", "Berlin  ·  Place"])
         case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
         case .regexExtract, .regexReplace, .jsonExtract, .textTransform, .script:
             return nil
@@ -213,6 +217,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
         case .enrichGloss:    return "tokens"
         case .detectLanguage: return "language"
         case .sentenceSplit:  return "sentences"
+        case .namedEntities:  return "entities"
         case .countTokens:    return "tokenCount"
         case .regexExtract:   return "match"
         case .regexReplace:   return "replaced"

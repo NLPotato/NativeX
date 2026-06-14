@@ -337,6 +337,26 @@ enum LanguageTools {
         tokenizer.string = text
         return tokenizer.tokens(for: text.startIndex..<text.endIndex).map { String(text[$0]).lowercased() }
     }
+
+    /// Named entities (people · places · organizations) via NLTagger's `.nameType` scheme — one
+    /// list item per entity as "surface  ·  Type". `.joinNames` folds multi-word names into a single
+    /// span; languages NLTagger can't tag yield an empty list. On-device, full iOS↔macOS parity.
+    static func namedEntities(_ text: String, language name: String) -> [String] {
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = text
+        if let lang = language(named: name) {
+            tagger.setLanguage(lang, range: text.startIndex..<text.endIndex)
+        }
+        let labels: [NLTag: String] = [.personalName: "Person", .placeName: "Place",
+                                       .organizationName: "Organization"]
+        var out: [String] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType,
+                             options: [.omitWhitespace, .omitPunctuation, .joinNames]) { tag, range in
+            if let tag, let label = labels[tag] { out.append("\(String(text[range]))  ·  \(label)") }
+            return true
+        }
+        return out
+    }
 }
 
 // MARK: - Deterministic gloss enrichment (NaturalLanguage + CFStringTokenizer)
