@@ -215,7 +215,7 @@
         <span class="fid">F2</span>
         <span class="ftitle">A run's result card can render off-screen and be unreachable</span>
         <span class="pill sev-med">Medium</span>
-        <span class="pill st-prog" data-status>In progress</span>
+        <span class="pill st-fixed" data-status>Fixed</span>
       </div>
       <div class="fbody">
         <p>Live-observed: I ran a graph and could not see its output. The single-run result card is placed to the right of the terminal FM node — usually the right-most node — so it overflows past all content, and Fit-to-view framed only the nodes, not the card.</p>
@@ -337,7 +337,7 @@
           <span class="files">— CanvasResultCard.swift · GraphEngine.swift · GraphCanvas.swift</span>
           <span class="got"><b>Gotcha:</b> card height is content-driven; the framing rect uses a nominal upper bound (over-estimate only adds padding, never clips).</span>
         </div>
-        <div class="lstat"><span class="pill st-prog" data-logstat>queued</span></div>
+        <div class="lstat"><span class="pill st-fixed" data-logstat>shipped ✓</span></div>
       </div>
       <div class="logrow" data-log="C">
         <div class="lid">C</div>

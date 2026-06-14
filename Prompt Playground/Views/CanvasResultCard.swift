@@ -44,7 +44,7 @@ struct CanvasResultCard: View {
             .frame(maxHeight: 260)
         }
         .padding(DS.Space.md)
-        .frame(width: 340, alignment: .leading)
+        .frame(width: NodeMetrics.resultCardWidth, alignment: .leading)   // shared with engine.resultCardRect
         .background(.dsSurface, in: RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous).strokeBorder(.dsHairline))
         .shadow(color: .black.opacity(0.35), radius: 16, y: 6)   // floats above the board as a distinct artifact

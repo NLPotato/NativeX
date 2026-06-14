@@ -86,11 +86,9 @@ struct GraphCanvas: View {
                     }
                     // Single-run result: a white, full-opacity card beside the terminal FM (NOT a graph node;
                     // view-only, never in GraphDef / topo / exec). Lives in the scaled layer so it pans+zooms.
-                    if let fm = engine.terminalFM, let text = engine.singleRunOutput, !engine.resultCardDismissed {
-                        let f = NodeMetrics.frame(fm)
+                    if let text = engine.singleRunOutput, let rect = engine.resultCardRect {
                         CanvasResultCard(engine: engine, text: text)
-                            .offset(x: f.maxX + 28 + engine.resultCardOffset.width,
-                                    y: f.minY + engine.resultCardOffset.height)
+                            .offset(x: rect.minX, y: rect.minY)   // rect is the engine's single source of truth (also drives Fit-to-view)
                             .zIndex(5)
                     }
                     // Compare results: side-by-side lane cards beneath the compare node (view-only overlay),

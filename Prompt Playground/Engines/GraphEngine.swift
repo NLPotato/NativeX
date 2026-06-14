@@ -25,6 +25,13 @@ enum NodeMetrics {
     static let portDot: CGFloat = 11
     static let previewSlot: CGFloat = 84 // body band that shows a text block's content on the card
 
+    // On-canvas single-run result card (CanvasResultCard). Width is fixed; height is content-driven and
+    // capped by its inner ScrollView, so `resultCardHeight` is a nominal upper bound used only for
+    // Fit-to-view framing — overshooting just adds a little padding, never clips the card.
+    static let resultCardWidth: CGFloat = 340
+    static let resultCardHeight: CGFloat = 300
+    static let resultCardGap: CGFloat = 28   // horizontal gap from the terminal FM node's right edge
+
     /// Card width: the manual override (drag the resize grip), clamped to a legible floor, else the default.
     static func width(_ n: GraphNode) -> CGFloat {
         if let w = n.w { return max(minWidth, CGFloat(w)) }
@@ -512,6 +519,17 @@ final class GraphEngine {
         return s.isEmpty ? nil : s
     }
 
+    /// Board-space rect of the on-canvas result card while it's showing (nil otherwise). Single source
+    /// of truth for BOTH placement (GraphCanvas) and framing (fitToView) — so the card can never drift
+    /// off the right edge unreachable: Fit-to-view always frames it alongside the nodes.
+    var resultCardRect: CGRect? {
+        guard let fm = terminalFM, singleRunOutput != nil, !resultCardDismissed else { return nil }
+        let f = NodeMetrics.frame(fm)
+        return CGRect(x: f.maxX + NodeMetrics.resultCardGap + resultCardOffset.width,
+                      y: f.minY + resultCardOffset.height,
+                      width: NodeMetrics.resultCardWidth, height: NodeMetrics.resultCardHeight)
+    }
+
     // MARK: Transform helpers (board ↔ canvas)
 
     func toCanvas(_ b: CGPoint) -> CGPoint {
@@ -541,6 +559,7 @@ final class GraphEngine {
         guard viewportSize.width > 0, viewportSize.height > 0 else { return }
         var rects = graph.nodes.filter { $0.kind != .promptGroup }.map(NodeMetrics.frame)
         for g in graph.nodes where g.kind == .promptGroup { if let r = groupRect(g.id) { rects.append(r) } }
+        if let card = resultCardRect { rects.append(card) }   // so a run's result card is framed, never stranded off-edge
         guard let first = rects.first else { return }
         let content = rects.dropFirst().reduce(first) { $0.union($1) }
         let pad: CGFloat = 60
