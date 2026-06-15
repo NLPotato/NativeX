@@ -46,7 +46,10 @@ struct GraphCanvas: View {
     var onOpenLab: () -> Void = {}        // batch summary "View in Lab" → switch to the Lab tab
 
     @State private var panStart: CGSize? = nil
+    @State private var panGrab: CGSize? = nil    // drag translation when the pan began (so press-⎵-mid-drag doesn't jump)
     @State private var zoomStart: CGFloat? = nil
+    @State private var spaceDown = false         // ⎵ held → drag pans the board (Figma parity)
+    @State private var cursorPushed = false      // balances the open/closed-hand cursor push
 
     /// The compare node the current result belongs to (matches by referenced lane group ids) — anchors the
     /// on-canvas lane cards beneath it.
@@ -63,12 +66,13 @@ struct GraphCanvas: View {
         // intrinsic size; the oversized scaled layer simply overflows and is clipped.
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                // Background — captures pan / zoom / deselect.
-                Color(nsColor: .underPageBackgroundColor)
+                // Background — the board texture (grid + corner glow); captures pan (⎵+drag) / zoom / deselect.
+                CanvasBackdrop()
                     .contentShape(Rectangle())
                     .onTapGesture { engine.clearSelection(); engine.selectedEdge = nil; engine.cancelArm() }
                     .gesture(pan)
                     .simultaneousGesture(zoom)
+                    .background(SpaceKeyMonitor(isDown: $spaceDown))
 
                 // Scaled content layer (canvas space). Group frames paint FIRST (behind edges + cards),
                 // then wires, then the wire hit-targets, then the node cards (which win any overlap).
@@ -115,6 +119,10 @@ struct GraphCanvas: View {
             .coordinateSpace(name: graphBoardSpace)
             .onDeleteCommand { engine.deleteSelectionOrEdge() }
             .onChange(of: geo.size, initial: true) { _, size in engine.viewportSize = size }
+            // Grab-hand cursor while ⎵ is held (open) / panning (closed) — the Figma pan affordance.
+            .onChange(of: spaceDown) { _, _ in syncPanCursor() }
+            .onChange(of: panStart) { _, _ in syncPanCursor() }
+            .onDisappear { if cursorPushed { NSCursor.pop(); cursorPushed = false } }
             // ALL floating chrome lives in ONE overlay inside a GlassEffectContainer, so co-located glass
             // surfaces merge into a single optical piece instead of stacking (design.md §3.5 glass-on-glass
             // rule). Empty space in the ZStack stays transparent → canvas gestures pass through.
@@ -156,15 +164,30 @@ struct GraphCanvas: View {
         }
     }
 
+    /// Panning the board now requires ⎵ held (Figma's hold-space-to-pan) — a plain background drag no
+    /// longer moves the canvas. `panGrab` baselines the translation at pan start so pressing ⎵ partway
+    /// through a drag doesn't snap the board.
     private var pan: some Gesture {
         DragGesture(coordinateSpace: .named(graphBoardSpace))
             .onChanged { v in
-                if panStart == nil { panStart = engine.offset }
-                let base = panStart ?? .zero
-                engine.offset = CGSize(width: base.width + v.translation.width,
-                                       height: base.height + v.translation.height)
+                guard spaceDown else { return }
+                if panStart == nil { panStart = engine.offset; panGrab = v.translation }
+                let base = panStart ?? .zero, grab = panGrab ?? v.translation
+                engine.offset = CGSize(width: base.width + v.translation.width - grab.width,
+                                       height: base.height + v.translation.height - grab.height)
             }
-            .onEnded { _ in panStart = nil }
+            .onEnded { _ in panStart = nil; panGrab = nil }
+    }
+
+    /// Open-hand while ⎵ is held, closed-hand mid-pan; popped when ⎵ releases. One push / one pop
+    /// (`cursorPushed` guards balance; `.onDisappear` is the safety pop).
+    private func syncPanCursor() {
+        if spaceDown {
+            let c: NSCursor = panStart != nil ? .closedHand : .openHand
+            if cursorPushed { c.set() } else { c.push(); cursorPushed = true }
+        } else if cursorPushed {
+            NSCursor.pop(); cursorPushed = false
+        }
     }
 
     private var zoom: some Gesture {
@@ -175,6 +198,75 @@ struct GraphCanvas: View {
                 engine.scale = min(max(base * val, 0.3), 2.5)
             }
             .onEnded { _ in zoomStart = nil }
+    }
+}
+
+// MARK: - Board backdrop
+
+/// The canvas board surface: a dark base (darker than the app chrome so node cards lift off it), a
+/// faint light-gray grid for spatial texture, and a weak neon-green glow bleeding in from the
+/// top-left corner — ties the board to the app's accent without competing with node color. Static
+/// (doesn't pan) — a quiet texture, not a measuring grid.
+private struct CanvasBackdrop: View {
+    private let grid: CGFloat = 32
+
+    var body: some View {
+        ZStack {
+            Color(.displayP3, red: 0.10, green: 0.11, blue: 0.13)
+            Canvas { ctx, size in
+                var path = Path()
+                var x: CGFloat = 0
+                while x <= size.width { path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: size.height)); x += grid }
+                var y: CGFloat = 0
+                while y <= size.height { path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: size.width, y: y)); y += grid }
+                ctx.stroke(path, with: .color(.white.opacity(0.035)), lineWidth: 1)
+            }
+            RadialGradient(colors: [Theme.accent.opacity(0.13), .clear],
+                           center: .topLeading, startRadius: 0, endRadius: 560)
+        }
+    }
+}
+
+// MARK: - Space-to-pan key monitor
+
+/// Tracks the ⎵ (space) key purely to gate canvas panning (Figma's hold-space-to-pan). A LOCAL event
+/// monitor — like `ScrollZoomMonitor` it observes events without becoming first responder, so it
+/// never steals mouse/drag. Space is consumed (returns nil) ONLY while this canvas is the on-screen,
+/// key view and no text field is editing — so it acts as a pan modifier here without swallowing space
+/// for buttons/typing elsewhere (other tabs, the inspector, a node rename).
+private struct SpaceKeyMonitor: NSViewRepresentable {
+    @Binding var isDown: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        context.coordinator.view = v
+        context.coordinator.setDown = { isDown = $0 }
+        context.coordinator.install()
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) { context.coordinator.setDown = { isDown = $0 } }
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.remove() }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var setDown: ((Bool) -> Void)?
+        private var monitor: Any?
+
+        func install() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+                guard let self, event.keyCode == 49,                                  // 49 = space
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+                else { return event }
+                if event.type == .keyUp { self.setDown?(false); return event }        // always un-stick on release
+                // keyDown: pan-modify only when this canvas is on-screen & key and nothing is being typed.
+                guard let v = self.view, let w = v.window, w.isKeyWindow, !v.visibleRect.isEmpty,
+                      !(w.firstResponder is NSText) else { return event }
+                self.setDown?(true)
+                return nil                                                            // consume → no beep; ⎵ is the pan modifier
+            }
+        }
+        func remove() { if let m = monitor { NSEvent.removeMonitor(m); monitor = nil } }
     }
 }
 
@@ -434,7 +526,8 @@ private struct NodeCardView: View {
                 if editingTitle {
                     TextField("", text: titleBinding)
                         .textFieldStyle(.plain).font(.dsLabel).lineLimit(1).focused($titleFocused)
-                        .onSubmit { editingTitle = false }
+                        .onSubmit { endTitleEdit() }          // ⏎ commits and leaves
+                        .onExitCommand { endTitleEdit() }     // ⎋ leaves — without this the field was a trap (only ⏎ escaped)
                         .onChange(of: titleFocused) { _, f in if !f { editingTitle = false } }
                 } else {
                     Text(displayTitle)
@@ -445,11 +538,20 @@ private struct NodeCardView: View {
                 // Line 2: the STATIC node-type label + the official Apple API name as a quiet chip (§6.1).
                 // No third row — the body band previews content; the result card shows the run output.
                 HStack(spacing: DS.Space.xs) {
-                    Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary)
-                    if let api = node.apiName {
-                        Text("·").font(.dsMicro).foregroundStyle(.tertiary)
-                        // The API name wins the squeeze — the kind label is usually echoed by the title.
-                        Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).layoutPriority(1)
+                    if node.kind == .nativeAPI || node.kind == .hook {
+                        // The operation caption (e.g. "NLTokenizer", "tokenCount(for:)") IS the identity
+                        // here, so give it the whole line; the icon + title already signal the kind, and
+                        // the redundant "Native API ·" prefix would only steal width.
+                        if let api = node.apiName {
+                            Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                        }
+                    } else {
+                        Text(node.kind.label).font(.dsMicro).foregroundStyle(.secondary)
+                        if let api = node.apiName {
+                            Text("·").font(.dsMicro).foregroundStyle(.tertiary)
+                            // The API name wins the squeeze — the kind label is usually echoed by the title.
+                            Text(api).font(.dsCodeMicro).foregroundStyle(.tertiary).layoutPriority(1)
+                        }
                     }
                 }
                 .lineLimit(1)
@@ -642,6 +744,15 @@ private struct NodeCardView: View {
         }
         editingTitle = true
         DispatchQueue.main.async { titleFocused = true }
+    }
+
+    /// Leave inline rename. The binding writes live, so whatever's typed is already committed;
+    /// this just drops focus and tears down the field. Both ⏎ and ⎋ route here so editing a
+    /// title is never a trap the user can't get out of (clicking empty canvas doesn't always
+    /// resign first responder, so a keyboard exit must exist).
+    private func endTitleEdit() {
+        titleFocused = false
+        editingTitle = false
     }
 
     private var moveGesture: some Gesture {
