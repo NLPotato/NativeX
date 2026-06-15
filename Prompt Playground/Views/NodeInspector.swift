@@ -82,7 +82,7 @@ struct NodeInspector: View {
                         PortabilityBadge(portability: inspectorPortability, showLabel: true, chip: true)   // §6.2
                     }
                     .lineLimit(1)
-                    if let api = node.wrappedValue.apiName {   // official API name, full width — never truncated (§6.1)
+                    if let api = node.wrappedValue.apiName {   // concise member (no crop); full hierarchy in the Operation section
                         Text(api).font(.dsCode).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
@@ -640,11 +640,11 @@ private struct HookEditor: View {
                 // which arguments exist (and how each renders), returnShape says whether the one
                 // shared "Output as" projection applies. No per-op UI code (UX-First §4.2).
                 let op = node.hook?.op ?? .textTransform
-                DSField(label: "Input",
-                        api: APICatalog.inputAnnotation(op: op),
-                        help: "The {{var}} whose value feeds the call.") {
-                    TextField("input", text: h.inputVar).dsTextField()
-                }
+                // The call's input shown ONCE — its {{var}} name AND the upstream source that supplies
+                // it, on one row. (Was a naming "Input" field up here + a separate "Inputs — wire each
+                // {{var}}" list at the bottom: the same single port twice, reading as two contradictory
+                // "input" entries.)
+                NativeInputSection(node: $node, engine: engine, nodeID: nodeID, op: op)
                 ForEach(op.paramKeys, id: \.self) { param in
                     if param == .command {
                         ScriptCommandEditor(node: $node)
@@ -657,7 +657,6 @@ private struct HookEditor: View {
                 }
                 outputSection(h, op: op)
             }
-            PortWiringSection(engine: engine, nodeID: nodeID)
             ResolvedOutputSection(text: hookOutput, status: run?.status, error: run?.error)
         }
     }
@@ -731,6 +730,79 @@ private struct HookEditor: View {
     }
 }
 
+/// A Native API / Hook node has exactly ONE input port (`hook.inputVar`). This section is the single
+/// place that argument lives — both its IDENTITY (the {{var}} name this node exposes) and its WIRING
+/// (the upstream output that supplies its value), on one row joined by a left-arrow so it reads
+/// `{{var}} ← source`. Replaces the old split — a "name the input" field stacked far above a generic
+/// "wire each {{var}}" list — which surfaced the same single port twice and read as two contradictory
+/// "input" entries. The name chip is cyan (the design-system variable/port hue, §2.3); renaming
+/// re-keys the incoming edge so the wire follows the rename instead of silently orphaning.
+private struct NativeInputSection: View {
+    @Binding var node: GraphNode
+    let engine: GraphEngine
+    let nodeID: UUID
+    let op: HookOp
+
+    /// Mirrors `GraphNode.inputPorts` for this node kind — the wire key IS the current var name.
+    private var port: String { node.hook?.inputVar ?? "input" }
+
+    var body: some View {
+        let current = engine.graph.incoming(nodeID).first { $0.inputPort == port }
+        let value = current.flatMap { engine.runs[$0.fromNodeID]?.outputs[$0.outputKey] }
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
+            DSSectionHeader("Input")
+            if let annotation = APICatalog.inputAnnotation(op: op) {
+                Text(annotation).font(.dsCodeMicro).foregroundStyle(.tertiary)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            // name ← source, on one line: the chip is what it's called, the menu is where it's from.
+            HStack(spacing: DS.Space.sm) {
+                varChip
+                Image(systemName: "arrow.left").font(.dsMicro).foregroundStyle(.tertiary)
+                PortSourceMenu(engine: engine, nodeID: nodeID, port: port)
+            }
+            if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                Text(v).font(.dsMicro).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Text("The chip names this argument (mirrors the Apple name); the menu wires the upstream output that supplies its value.")
+                .font(.dsCaption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+        .dsGroup()
+    }
+
+    /// The input's name, editable inline and styled as a `{{var}}` chip — its cyan tint marks it as a
+    /// variable/port (§2.3), distinct from the neutral source menu beside it.
+    private var varChip: some View {
+        HStack(spacing: DS.Space.xxs) {
+            Text("{{").font(.dsCode).foregroundStyle(.dsInfo)
+            TextField("var", text: inputVarBinding)
+                .textFieldStyle(.plain).font(.dsCode).foregroundStyle(.primary)
+                .fixedSize()
+            Text("}}").font(.dsCode).foregroundStyle(.dsInfo)
+        }
+        .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xs)
+        .background(Theme.cyan.opacity(0.12), in: RoundedRectangle(cornerRadius: DS.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).strokeBorder(Theme.cyan.opacity(0.35)))
+        .help("The {{var}} this node exposes — defaults to the Apple argument name. Rename to reference its value as a different variable.")
+    }
+
+    /// Renaming the var re-keys any incoming wire to the new name so the connection follows the rename;
+    /// an edge left on the old port name would vanish from both this menu and the canvas (orphaned).
+    private var inputVarBinding: Binding<String> {
+        Binding(
+            get: { node.hook?.inputVar ?? "" },
+            set: { newName in
+                let old = node.hook?.inputVar ?? ""
+                guard old != newName else { return }
+                node.hook?.inputVar = newName
+                for i in engine.graph.edges.indices
+                where engine.graph.edges[i].toNodeID == nodeID && engine.graph.edges[i].inputPort == old {
+                    engine.graph.edges[i].inputPort = newName
+                }
+            })
+    }
+}
+
 /// Catalog picker for the Native API / Hook operation (PRD §4.2, §8.3-lite). COLLAPSED at rest —
 /// one combo-box row showing the selected op (name · symbol · framework) — and expands on click
 /// into a searchable list grouped by framework, with PRD-planned ops folded into their own
@@ -744,8 +816,10 @@ private struct OpCatalogPicker: View {
     /// Ops offered for this node kind (mirrors the original split: NL/FM ops on a Native API node;
     /// glue/script ops on a Hook node). Planned entries surface on the Native API side only.
     private var candidates: [APICatalogEntry] {
+        // .sentenceSplit merged into .tokenizeWords (unit picker) per ADR-20260615 — dropped from the
+        // palette; the case persists so legacy nodes still resolve + execute.
         let ops: [HookOp] = node.kind == .nativeAPI
-            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .sentenceSplit, .namedEntities, .sentiment, .textStats, .ocrText, .readBarcode, .countTokens]
+            ? [.tokenizeWords, .enrichGloss, .detectLanguage, .namedEntities, .sentiment, .textStats, .ocrText, .readBarcode, .countTokens]
             : [.script, .regexExtract, .regexReplace, .jsonExtract, .textTransform, .chunkText]
         return ops.compactMap(APICatalog.entry(for:))
     }
@@ -775,12 +849,10 @@ private struct OpCatalogPicker: View {
                 HStack(alignment: .top, spacing: DS.Space.sm) {
                     VStack(alignment: .leading, spacing: DS.Space.xxs) {
                         Text(selected?.name ?? "Choose an operation…").font(.dsLabel)
-                        HStack(spacing: DS.Space.sm) {
-                            Text(selected?.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
-                            if let fw = selected?.framework {
-                                Text(fw).font(.dsMicro).foregroundStyle(.dsInfo)
-                            }
-                        }
+                        // The API as a HIERARCHY of levels (member › type › framework), each on its own
+                        // line so the narrow pane never crops it (§4.2). The member — the operation —
+                        // is the identifying level; the type owns the member, the framework owns the type.
+                        if let s = selected { APIHierarchy(entry: s) }
                     }
                     Spacer(minLength: 0)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -905,6 +977,30 @@ private struct ScriptCommandEditor: View {
     }
 }
 
+/// The backing Apple API shown as a HIERARCHY of levels — member (the operation) › type › framework —
+/// each on its own line so the narrow inspector never crops a long `Type.member` string (§4.2). The
+/// member is the identifying level; the type owns the member; the framework owns the type.
+private struct APIHierarchy: View {
+    let entry: APICatalogEntry
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            // Top line = the member (operation) ONLY for one-shot-method ops. A stateful-type op has no
+            // `member` (its cardCaption IS the type), so we skip this line to avoid doubling the type
+            // symbol shown on the `type › framework` line below.
+            if let member = entry.member {
+                Text(member).font(.dsCodeMicro).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(spacing: DS.Space.xs) {
+                if let sym = entry.calls.first?.symbol {
+                    Text(sym).font(.dsMicro).foregroundStyle(.tertiary)
+                    Text("›").font(.dsMicro).foregroundStyle(.tertiary)
+                }
+                Text(entry.framework).font(.dsMicro).foregroundStyle(.dsInfo)
+            }
+        }
+    }
+}
+
 private struct OpRow: View {
     let entry: APICatalogEntry
     @Binding var node: GraphNode
@@ -916,12 +1012,30 @@ private struct OpRow: View {
     var body: some View {
         Button {
             guard let op = entry.op else { return }
-            // Refresh the output var only when it's still the previous op's default (don't clobber
-            // a custom name); params persist — matching keys carry across ops.
-            let oldDefault = node.hook?.op.defaultOutputVar
+            // Refresh the input/output var + auto-title only when each still matches the PREVIOUS op's
+            // default (don't clobber a custom name); params persist — matching keys carry across ops.
+            let prevOp = node.hook?.op
+            let oldDefault = prevOp?.defaultOutputVar
             node.hook?.opRaw = op.rawValue
             if (node.hook?.outputVar.isEmpty ?? true) || node.hook?.outputVar == oldDefault {
                 node.hook?.outputVar = op.defaultOutputVar
+            }
+            // Native API nodes mirror the real call, so the input variable IS the official argument
+            // name (e.g. `for` for tokenCount(for:), `string` for NLTokenizer). Refresh when it still
+            // mirrors the previous op's arg, is empty, or is a pre-faithful legacy default
+            // ("text"/"input") — but never clobber a name the user deliberately chose.
+            if node.kind == .nativeAPI {
+                let oldIn = prevOp.flatMap { APICatalog.defaultInputVar(for: $0) }
+                let cur = node.hook?.inputVar ?? ""
+                if cur.isEmpty || cur == oldIn || cur == "text" || cur == "input",
+                   let newIn = APICatalog.defaultInputVar(for: op) {
+                    node.hook?.inputVar = newIn
+                }
+            }
+            // The node factory seeds the title with the op's display name; keep it in step so the
+            // card/header don't keep showing the old op (e.g. "Tokenize words") after a switch.
+            if node.title.isEmpty || node.title == prevOp?.displayName {
+                node.title = op.displayName
             }
             onSelect?()
         } label: {
@@ -938,10 +1052,7 @@ private struct OpRow: View {
                         Text(note).dsBadge(.dsInfo)   // version-gated native path; runs `fallback` below `since`
                     }
                 }
-                HStack(spacing: DS.Space.sm) {
-                    Text(entry.calls.first?.symbol ?? "").font(.dsCodeMicro).foregroundStyle(.tertiary)
-                    Text(entry.framework).font(.dsMicro).foregroundStyle(.dsInfo)
-                }
+                APIHierarchy(entry: entry)
                 Text(entry.summary).font(.dsMicro).foregroundStyle(.tertiary).lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1092,9 +1203,12 @@ private struct APIMappingSection: View {
                     }
                     .padding(.top, DS.Space.sm)
                 } label: {
+                    // Structural prompt nodes lead with the friendly name + show the Apple type here as a
+                    // "Compiles to" reference (ADR-20260615); API-mirror nodes show their "API mapping".
+                    let isStructural = node.kind == .promptGroup || node.kind.isBlock
                     HStack(spacing: DS.Space.sm) {
-                        Image(systemName: "function").font(.dsCaption).foregroundStyle(.secondary)
-                        Text("API mapping").font(.dsLabel)
+                        Image(systemName: isStructural ? "arrow.down.right.circle" : "function").font(.dsCaption).foregroundStyle(.secondary)
+                        Text(isStructural ? "Compiles to" : "API mapping").font(.dsLabel)
                         Text("\(calls.count) call\(calls.count == 1 ? "" : "s")")
                             .font(.dsMicro).foregroundStyle(.tertiary)
                     }
@@ -1257,40 +1371,13 @@ private struct PortWiringRow: View {
     let port: String
 
     var body: some View {
-        let producers = engine.producers(of: port, excluding: nodeID)
         let current = engine.graph.incoming(nodeID).first { $0.inputPort == port }
         let value = current.flatMap { engine.runs[$0.fromNodeID]?.outputs[$0.outputKey] }
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             HStack(spacing: DS.Space.xs) {
                 tag(port)
                 Image(systemName: "arrow.left").font(.dsMicro).foregroundStyle(.tertiary)
-                Menu {
-                    if current != nil {
-                        Button(role: .destructive) { engine.unwire(to: nodeID, port: port) } label: {
-                            Label("Disconnect", systemImage: "xmark")
-                        }
-                        Divider()
-                    }
-                    if producers.isEmpty {
-                        Text("No node outputs “\(port)”")
-                    } else {
-                        ForEach(producers) { p in
-                            Button { engine.wire(from: p.id, key: port, to: nodeID, port: port) } label: {
-                                Label(engine.displayTitle(p.id), systemImage: p.kind.symbol)
-                            }
-                        }
-                    }
-                } label: {
-                    if let c = current {
-                        Text(engine.displayTitle(c.fromNodeID)).font(.dsCaption.weight(.medium)).lineLimit(1)
-                    } else {
-                        Text("Choose source…").font(.dsCaption).foregroundStyle(.secondary)
-                    }
-                }
-                .menuStyle(.borderlessButton).fixedSize()
-                if current == nil && producers.isEmpty {
-                    Text("nothing outputs it yet").font(.dsMicro).foregroundStyle(.tertiary)
-                }
+                PortSourceMenu(engine: engine, nodeID: nodeID, port: port)
             }
             if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
                 Text(v).font(.dsMicro).foregroundStyle(.secondary).lineLimit(2).padding(.leading, DS.Space.xs)
@@ -1302,6 +1389,50 @@ private struct PortWiringRow: View {
         Text(p).font(.dsCode).foregroundStyle(.primary)
             .padding(.horizontal, DS.Space.sm).padding(.vertical, DS.Space.xxs)
             .background(.quaternary, in: Capsule())
+    }
+}
+
+/// The source-picker dropdown for ONE input port: choose / disconnect which upstream node feeds it,
+/// with the "nothing outputs it yet" hint when no producer matches. Shared by the template-block
+/// wiring list (`PortWiringRow`) and the Native API input section so the two can never drift.
+/// Producers are matched by output name (`engine.producers`).
+private struct PortSourceMenu: View {
+    let engine: GraphEngine
+    let nodeID: UUID
+    let port: String
+
+    var body: some View {
+        let producers = engine.producers(of: port, excluding: nodeID)
+        let current = engine.graph.incoming(nodeID).first { $0.inputPort == port }
+        HStack(spacing: DS.Space.xs) {
+            Menu {
+                if current != nil {
+                    Button(role: .destructive) { engine.unwire(to: nodeID, port: port) } label: {
+                        Label("Disconnect", systemImage: "xmark")
+                    }
+                    Divider()
+                }
+                if producers.isEmpty {
+                    Text("No node outputs “\(port)”")
+                } else {
+                    ForEach(producers) { p in
+                        Button { engine.wire(from: p.id, key: port, to: nodeID, port: port) } label: {
+                            Label(engine.displayTitle(p.id), systemImage: p.kind.symbol)
+                        }
+                    }
+                }
+            } label: {
+                if let c = current {
+                    Text(engine.displayTitle(c.fromNodeID)).font(.dsCaption.weight(.medium)).lineLimit(1)
+                } else {
+                    Text("Choose source…").font(.dsCaption).foregroundStyle(.secondary)
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            if current == nil && producers.isEmpty {
+                Text("nothing outputs it yet").font(.dsMicro).foregroundStyle(.tertiary)
+            }
+        }
     }
 }
 

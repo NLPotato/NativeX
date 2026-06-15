@@ -812,7 +812,9 @@ final class GraphEngine {
         case .guided:      return .guided(.glossLike)
         case .tool:        return .tool(name: "", description: "")
         case .input:       return .input(source: .staticLiteral, statics: ["input": ""])
-        case .nativeAPI:   return .nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words")
+        case .nativeAPI:   return .nativeAPI(op: .tokenizeWords,
+                                             inputVar: APICatalog.defaultInputVar(for: .tokenizeWords) ?? "input",
+                                             outputVar: HookOp.tokenizeWords.defaultOutputVar)
         case .hook:        return .hook(op: .script, inputVar: "input", outputVar: "result", params: ["timeout": "30"])
         case .fm:          return .fm()
         case .compare:     return .compare()
@@ -834,12 +836,12 @@ final class GraphEngine {
         let guided = GraphNode.guided(.glossLike, groupID: group.id, x: 720, y: 400, title: "Guided output")
         let input = GraphNode.input(source: .staticLiteral, statics: ["sentence": "Der Hund schläft."],
                                     x: 40, y: 300, title: "Sentence")
-        let tok = GraphNode.nativeAPI(op: .tokenizeWords, inputVar: "text", outputVar: "words",
+        let tok = GraphNode.nativeAPI(op: .tokenizeWords, inputVar: "string", outputVar: "words",
                                       x: 40, y: 520, title: "Tokenize words")
         let fm = GraphNode.fm(x: 1020, y: 240, title: "Foundation Model")
         var g = GraphDef(nodes: [group, instr, current, guided, input, tok, fm])
         g.edges = [
-            GraphEdge(fromNodeID: input.id, outputKey: "sentence", toNodeID: tok.id,     inputPort: "text"),
+            GraphEdge(fromNodeID: input.id, outputKey: "sentence", toNodeID: tok.id,     inputPort: "string"),
             GraphEdge(fromNodeID: input.id, outputKey: "sentence", toNodeID: current.id, inputPort: "sentence"),
             GraphEdge(fromNodeID: tok.id,   outputKey: "words",    toNodeID: current.id, inputPort: "words"),
             GraphEdge(fromNodeID: group.id, outputKey: "prompt",   toNodeID: fm.id,      inputPort: "prompt"),

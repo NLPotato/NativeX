@@ -41,7 +41,7 @@ enum Portability: String, Codable, Sendable {
 /// it, so the inspector is generated from the op's argument list — no per-op UI code, and a node
 /// only ever shows the arguments its API actually takes.
 enum HookParam: String, Sendable, Hashable {
-    case language, pattern, group, replacement, path, mode, command, timeout, chunkSize, overlap
+    case language, pattern, group, replacement, path, mode, command, timeout, chunkSize, overlap, unit
 
     /// How the inspector renders this parameter. `.choice` is a closed set (segmented/menu picker
     /// instead of free text — no magic strings to memorize); `.text` is free text ({{vars}} allowed).
@@ -59,6 +59,7 @@ enum HookParam: String, Sendable, Hashable {
         case .timeout:     return "timeout"
         case .chunkSize:   return "chunk size"
         case .overlap:     return "overlap"
+        case .unit:        return "unit"
         }
     }
     var placeholder: String {
@@ -73,11 +74,13 @@ enum HookParam: String, Sendable, Hashable {
         case .timeout:     return "seconds (default 30)"
         case .chunkSize:   return "characters per chunk, e.g. 1000"
         case .overlap:     return "overlapping characters (default 0)"
+        case .unit:        return "word | sentence"
         }
     }
     var control: Control {
         switch self {
         case .mode: return .choice(["trim", "lower", "upper", "trimlines", "fold", "collapse"])
+        case .unit: return .choice(["word", "sentence"])
         default:    return .text
         }
     }
@@ -127,7 +130,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
-        case .tokenizeWords:  return "Tokenize words"
+        case .tokenizeWords:  return "Tokenize"
         case .enrichGloss:    return "Enrich tokens"
         case .detectLanguage: return "Detect language"
         case .sentenceSplit:  return "Split sentences"
@@ -147,7 +150,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     }
     var detail: String {
         switch self {
-        case .tokenizeWords:  return "NLTokenizer → a word list"
+        case .tokenizeWords:  return "NLTokenizer → word or sentence segments (unit-selectable)"
         case .enrichGloss:    return "NaturalLanguage POS + lemma + romanization per word"
         case .detectLanguage: return "NLLanguageRecognizer → dominant language code"
         case .sentenceSplit:  return "NLTokenizer → one sentence per line"
@@ -186,7 +189,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// Output serialization is not here; it's the shared `OutputProjection` keyed on `returnShape`.
     var paramKeys: [HookParam] {
         switch self {
-        case .tokenizeWords:  return [.language]
+        case .tokenizeWords:  return [.unit, .language]
         case .enrichGloss:    return [.language]
         case .namedEntities:  return [.language]
         case .sentenceSplit:  return []
@@ -217,14 +220,20 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// A concrete sample of what this op writes into its output var, rendered through the live
     /// projection — shown in the inspector so the output is never a black box. nil when the shape
     /// depends entirely on the user's pattern/path/script (no honest sample exists).
+    /// Invariant (PRD §4.2): every sample is a REAL output of the backing Apple API — verified
+    /// against the executor (HookEngine) and Apple's documented return types, never invented.
     func outputPreview(projection: OutputProjection) -> String? {
         switch self {
         case .tokenizeWords:  return projection.render(["Der", "Hund", "schläft"])
         case .sentenceSplit:  return projection.render(["Der Hund schläft.", "Die Katze wacht."])
-        case .enrichGloss:    return projection.render(["Der  ·  Determiner  ·  lemma: der",
-                                                        "schläft  ·  Verb  ·  lemma: schlafen  ·  [shlayft]"])
+        // Real NLTagger output for "Der Hund schläft." (de): POS is the lowercased NLTag.lexicalClass
+        // rawValue; the lemma is shown only when it differs from the surface; no romanization for
+        // Latin scripts (CJK input adds a [reading] from CFStringTokenizer, e.g. 猫 → [neko]).
+        case .enrichGloss:    return projection.render(["Der  ·  determiner", "Hund  ·  noun",
+                                                        "schläft  ·  verb  ·  lemma: schlafen"])
         case .detectLanguage: return "de"
-        case .namedEntities:  return projection.render(["Apple  ·  Organization", "Tim Cook  ·  Person", "Cupertino  ·  Place"])
+        // Real NLTagger .nameType output for "Tim Cook announced that Apple will open a store in Berlin."
+        case .namedEntities:  return projection.render(["Tim Cook  ·  Person", "Apple  ·  Organization", "Berlin  ·  Place"])
         case .sentiment:      return #"{"score": 0.82, "label": "positive"}"#
         case .textStats:      return #"{"characters": 248, "words": 41, "sentences": 3, "lines": 5}"#
         case .countTokens:    return #"{"tokens": 128, "contextWindow": 4096, "percentOfWindow": 3.1}"#
@@ -239,7 +248,7 @@ enum HookOp: String, Codable, CaseIterable, Sendable {
     /// A sensible default `outputVar` when the op is first added.
     var defaultOutputVar: String {
         switch self {
-        case .tokenizeWords:  return "words"
+        case .tokenizeWords:  return "tokens"
         case .enrichGloss:    return "tokens"
         case .detectLanguage: return "language"
         case .sentenceSplit:  return "sentences"

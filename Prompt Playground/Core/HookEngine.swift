@@ -105,8 +105,12 @@ enum HookEngine {
     private static func apply(_ op: HookOp, input: String, params: [String: String], context: [String: String]) async throws -> HookValue {
         switch op {
         case .tokenizeWords:
-            return .list(tokenize(input, unit: .word, language: params[HookParam.language.rawValue]))
-        case .sentenceSplit:
+            // Merged tokenizer (ADR-20260615): one NLTokenizer node, unit selected in the inspector.
+            let unit: NLTokenUnit = params[HookParam.unit.rawValue] == "sentence" ? .sentence : .word
+            var toks = tokenize(input, unit: unit, language: params[HookParam.language.rawValue])
+            if unit == .sentence { toks = toks.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
+            return .list(toks)
+        case .sentenceSplit:   // legacy op, kept for back-compat decode; merged into .tokenizeWords (unit: .sentence)
             return .list(tokenize(input, unit: .sentence, language: nil)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         case .enrichGloss:

@@ -201,25 +201,17 @@ struct GraphNode: Codable, Identifiable, Equatable, Sendable {
 }
 
 extension GraphNode {
-    /// The official Apple API this node maps to (design.md §6.1) — surfaced as a quiet secondary chip
-    /// next to the friendly label (UX-First: teach the real API while you prototype). `nil` for plain
-    /// data sources (Input) that have no backing API. Op-dependent for native-API/hook nodes.
+    /// Card + inspector-header caption. Two node families (ADR-20260615): API-mirror nodes (nativeAPI/
+    /// hook) and the FM execution node lead with the faithful Apple symbol; STRUCTURAL prompt nodes
+    /// (Prompt + its blocks) and pure data nodes (Input/Compare) lead with the friendly name and carry
+    /// NO API caption — their Apple type is shown as the inspector "Compiles to" mapping (APICatalog.calls,
+    /// rendered by APIMappingSection), not on the card. Apple's Transcript/Instructions vocabulary isn't
+    /// the LLM-ops lingua franca, so it's education in the inspector, not the card's identity.
     var apiName: String? {
         switch kind {
-        case .promptGroup: return "LanguageModelSession"   // the request it assembles
-        case .instruction: return "Instructions"
-        case .fewshot:     return "Transcript"
-        case .history:     return "Transcript.Entry"
-        case .current:     return "Prompt"
-        case .guided:      return "DynamicGenerationSchema"
-        case .tool:        return "Tool"
-        case .input:       return nil
-        case .fm:          return "LanguageModelSession"
-        case .compare:     return "ComparePayload"
-        case .nativeAPI, .hook:
-            // One source of truth: the APICatalog entry's first call symbol (its doc + argument
-            // mapping render in the inspector's "API mapping" section).
-            return hook.flatMap { APICatalog.entry(for: $0.op)?.calls.first?.symbol }
+        case .fm:               return "LanguageModelSession"   // the FM node IS the call, not a concept hiding it
+        case .nativeAPI, .hook: return hook.flatMap { APICatalog.entry(for: $0.op)?.cardCaption }
+        default:                return nil                      // structural prompt nodes + Input/Compare
         }
     }
 

@@ -70,6 +70,14 @@ struct APICatalogEntry: Identifiable {
     let calls: [APICall]
     var keywords: [String] = []
 
+    /// The op's caption: ONE official symbol at the API's own granularity (PRD §4.2 API faithfulness).
+    /// A one-shot call → the METHOD (`tokenCount(for:)`). A STATEFUL instance API (NLTokenizer/NLTagger:
+    /// construct, set `.string`, read) → the TYPE (`NLTokenizer`); the unit/scheme/args live in the
+    /// inspector, never on the card. NEVER a crammed ctor (`NLTokenizer(unit: .word)`), a fake static
+    /// call (`NLTokenizer.tokens`), a bare enum (`.word`), or a method+arg mashup (`tokens(for:) · .word`).
+    /// Authored per entry; nil ⇒ `cardCaption` falls back to the call's type symbol.
+    var member: String? = nil
+
     /// Minimum macOS for the op's NATIVE path (e.g. "26.4"); nil ⇒ no version floor. This is why the
     /// catalog is ONE version-annotated registry, not one-per-OS: a row declares its floor and the
     /// executor does the `#available` dispatch. `fallback` names what runs below `since` (declared
@@ -78,6 +86,12 @@ struct APICatalogEntry: Identifiable {
     var since: String? = nil
     var fallback: String? = nil
     var id: String { op?.rawValue ?? plannedKey ?? name }
+
+    /// Node-card caption (216pt — narrow) + inspector header: the op's `member` (the official symbol at
+    /// the API's granularity — a method for one-shot ops), else the call's type symbol (the right anchor
+    /// for a stateful instance API). The card never crams args/hierarchy (PRD §4.2); the inspector's
+    /// Operation section shows the full member › type › framework hierarchy.
+    var cardCaption: String { member ?? calls.first?.symbol ?? name }
 
     /// Picker / mapping badge when the native path is version-gated, e.g. "macOS 26.4+".
     var availabilityNote: String? { since.map { "macOS \($0)+" } }
@@ -108,21 +122,21 @@ enum APICatalog {
 
     private static let available: [APICatalogEntry] = [
         APICatalogEntry(
-            op: .tokenizeWords, plannedKey: nil, name: "Tokenize words",
+            op: .tokenizeWords, plannedKey: nil, name: "Tokenize",
             framework: "NaturalLanguage",
-            summary: "Segment text into words (CJK-aware) and emit a formatted list.",
+            summary: "Segment text into words or sentences (CJK-aware) — the unit is selected in the inspector.",
             status: .available, portability: .universal,
             calls: [APICall(
                 symbol: "NLTokenizer",
                 signature: "init(unit:) · setLanguage(_:) · tokens(for:)",
                 args: [
-                    APIArgument("unit", "NLTokenUnit", "fixed — .word"),
+                    APIArgument("unit", "NLTokenUnit", "“unit” picker — .word | .sentence", param: .unit),
                     APIArgument("setLanguage", "NLLanguage", "“language” param (name or code; empty = auto)", param: .language),
                     APIArgument("string", "String", "input wire (in var)", fromInput: true),
                 ],
-                returns: "[Range<String.Index>] → word list, serialized by the node's “Output as” projection",
+                returns: "[Range<String.Index>] → token list, serialized by the node's “Output as” projection",
                 docPath: "naturallanguage/nltokenizer")],
-            keywords: ["segment", "word", "split", "cjk"]),
+            keywords: ["segment", "word", "sentence", "split", "tokenize", "cjk"]),
 
         APICatalogEntry(
             op: .sentenceSplit, plannedKey: nil, name: "Split sentences",
@@ -171,7 +185,7 @@ enum APICatalog {
                         signature: "kCFStringTokenizerAttributeLatinTranscription",
                         args: [APIArgument("locale", "CFLocale", "“language” param", param: .language)],
                         returns: "romaja / pinyin / romaji reading (non-Latin scripts)",
-                        docPath: "corefoundation/cfstringtokenizer-rf8"),
+                        docPath: "corefoundation/cfstringtokenizer"),
             ],
             keywords: ["gloss", "pos", "lemma", "reading", "romanization", "morphology"]),
 
@@ -228,13 +242,14 @@ enum APICatalog {
             status: .available, portability: .universal,
             calls: [
                 APICall(symbol: "SystemLanguageModel",
-                        signature: "tokenCount(for:) async throws -> Int · contextSize",
-                        args: [APIArgument("for", "String", "input wire (in var)", fromInput: true)],
-                        returns: "Int → JSON {tokens, contextWindow, percentOfWindow} (chain JSON extract for one field)",
-                        docPath: "foundationmodels/systemlanguagemodel",
-                        note: "The 26.2 SDK this app builds with exposes neither symbol (verified against its swiftinterface), so the op currently uses TokenEstimator: CJK ≈ 1 tok/char, else ≈ 1 tok/4 chars, vs the 4,096-token on-device window."),
+                        signature: "tokenCount(for:) async throws -> Int",
+                        args: [APIArgument("for", "some PromptRepresentable", "input wire — text counted as a Prompt (for: has Instructions/Prompt/GenerationSchema/[Tool]/Transcript overloads)", fromInput: true)],
+                        returns: "Int → wrapped as JSON {tokens, contextWindow, percentOfWindow} (chain JSON extract for one field)",
+                        docPath: "foundationmodels/systemlanguagemodel/tokencount(for:)",
+                        note: "tokenCount(for:) ships in 26.4 (NOT back-deployed); contextSize is 26.0+ (back-deployed). The 26.2 SDK this app builds with exposes neither (verified against its swiftinterface), so the op currently uses TokenEstimator: CJK ≈ 1 tok/char, else ≈ 1 tok/4 chars, vs the 4,096-token on-device window."),
             ],
             keywords: ["token", "count", "context", "window", "estimate", "usage", "overflow"],
+            member: "tokenCount(for:)",
             since: "26.4", fallback: "TokenEstimator heuristic"),
 
         APICatalogEntry(
@@ -313,8 +328,9 @@ enum APICatalog {
                     APIArgument("path walk", "String", "“path” param, e.g. words.0.surface", param: .path),
                 ],
                 returns: "String — the scalar at the path",
-                docPath: "foundation/jsonserialization")],
-            keywords: ["json", "path", "extract", "field", "parse"]),
+                docPath: "foundation/jsonserialization/jsonobject(with:options:)-8demi")],
+            keywords: ["json", "path", "extract", "field", "parse"],
+            member: "jsonObject(with:)"),
 
         APICatalogEntry(
             op: .textTransform, plannedKey: nil, name: "Text transform",
@@ -325,7 +341,7 @@ enum APICatalog {
                 symbol: "String",
                 signature: "trimmingCharacters(in:) · lowercased() · uppercased() · folding(options:)",
                 args: [
-                    APIArgument("self", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("text", "String", "input wire (in var) — the String receiver", fromInput: true),
                     APIArgument("mode", "String", "“mode” picker: trim | lower | upper | trimlines | fold | collapse", param: .mode),
                 ],
                 returns: "String",
@@ -341,7 +357,7 @@ enum APICatalog {
                 symbol: "String",
                 signature: "windowed character slices",
                 args: [
-                    APIArgument("self", "String", "input wire (in var)", fromInput: true),
+                    APIArgument("text", "String", "input wire (in var) — the String receiver", fromInput: true),
                     APIArgument("size", "Int", "“chunk size” param (characters per window)", param: .chunkSize),
                     APIArgument("overlap", "Int", "“overlap” param (shared characters, default 0)", param: .overlap),
                 ],
@@ -395,7 +411,8 @@ enum APICatalog {
                 args: [APIArgument("target", "String", "input wire (value to score)")],
                 returns: "score + rationale",
                 docPath: "foundationmodels")],
-            keywords: ["evaluate", "judge", "score", "similarity", "eval"]),
+            keywords: ["evaluate", "judge", "score", "similarity", "eval"],
+            member: "FoundationModels"),   // anti-fabrication: ModelJudgeEvaluator is an unverified WWDC-2026 name; anchor on the framework until a real symbol ships
     ]
 }
 
@@ -441,20 +458,20 @@ extension APICatalog {
         case .history:
             let isHuman = (node.history?.role ?? .human) == .human
             return [APICall(
-                symbol: isHuman ? "Transcript.Prompt" : "Transcript.Response",
-                signature: isHuman ? "init(segments:)" : "init(assetIDs:segments:)",
+                symbol: "Transcript.Entry",
+                signature: isHuman ? ".prompt(Transcript.Prompt(segments:))" : ".response(Transcript.Response(assetIDs:segments:))",
                 args: [
                     APIArgument("segments", "[Transcript.Segment]", "this block's content (resolved {{vars}})"),
                     APIArgument("role", "Entry", "Role picker — \(isHuman ? "Human → .prompt" : "AI → .response") entry"),
                 ],
-                docPath: "foundationmodels/transcript")]
+                docPath: "foundationmodels/transcript/entry")]
 
         case .current:
             return [APICall(
-                symbol: "LanguageModelSession",
-                signature: "respond(to:options:)",
-                args: [APIArgument("to", "String", "this template, resolved (recorded as the trailing Transcript.Prompt entry)")],
-                docPath: "foundationmodels/languagemodelsession")]
+                symbol: "Transcript.Prompt",
+                signature: "init(segments:options:responseFormat:)",
+                args: [APIArgument("segments", "[Transcript.Segment]", "this template, resolved — the trailing prompt entry (the FM node makes the respond(to:) call)")],
+                docPath: "foundationmodels/transcript/prompt")]
 
         case .guided:
             let name = node.guided?.schemaDef?.typeName ?? "—"
@@ -554,6 +571,13 @@ extension APICatalog {
             }
         }
         return nil
+    }
+
+    /// The official ARGUMENT/property name the input wire feeds — `string` for NLTokenizer/NLTagger,
+    /// `for` for `tokenCount(for:)`, `on` for Vision `perform(on:)`. The faithful default for a Native
+    /// API node's input variable, so the node mirrors the real Swift call (PRD §4.2). nil ⇒ no input arg.
+    static func defaultInputVar(for op: HookOp) -> String? {
+        entry(for: op)?.calls.lazy.compactMap { $0.args.first { $0.fromInput }?.name }.first
     }
 
     private static func samplingSource(_ config: GenConfig) -> String {
