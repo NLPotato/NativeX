@@ -538,6 +538,19 @@ enum ModelAvailability {
         return false
     }
 
+    /// BCP-47 languages the on-device model supports, queried at runtime (coverage widens across OS
+    /// point releases — never hardcode). Mirrors the iOS port's `getAvailability()`.
+    static var supportedLanguages: [String] {
+        SystemLanguageModel.default.supportedLanguages.map { $0.maximalIdentifier }.sorted()
+    }
+
+    /// Whether the current device locale is one the model supports (`supportsLocale`). A *truthful*
+    /// language-mismatch signal — Apple folds the mismatch into `.appleIntelligenceNotEnabled`, so
+    /// without this the cause can't be told apart from "AI simply off". (iOS-port parity.)
+    static var localeSupported: Bool {
+        SystemLanguageModel.default.supportsLocale(Locale.current)
+    }
+
     /// Non-nil when the model can't run; explains why.
     static var message: String? {
         switch SystemLanguageModel.default.availability {
@@ -548,7 +561,10 @@ enum ModelAvailability {
             case .deviceNotEligible:
                 return "Foundation Models isn't available on this Mac (requires Apple silicon)."
             case .appleIntelligenceNotEnabled:
-                return "Apple Intelligence is off. Enable it in System Settings ▸ Apple Intelligence & Siri, and make sure the Siri language matches your device language."
+                // Distinguish the two folded-together causes via the now-truthful locale check.
+                return localeSupported
+                    ? "Apple Intelligence is off. Enable it in System Settings ▸ Apple Intelligence & Siri."
+                    : "The device language (\(Locale.current.identifier(.bcp47))) isn't supported by the on-device model. Set System Settings ▸ Apple Intelligence & Siri to a supported language, with the Siri language matching."
             case .modelNotReady:
                 return "The on-device model is still downloading. Try again shortly."
             @unknown default:
